@@ -34,7 +34,8 @@ int main(int argc, char* argv[]) {
     assert(child_pcb);
 
     while (1) {
-      pid_t pid = waitpid(child_pcb->pid, &status, __WALL);
+      pid_t pid = waitpid(child_pcb->pid, &status, 0);
+      //pid_t pid = waitpid(child_pcb->pid, &status, __WALL);
       assert(pid == child_pcb->pid);
 
       if (WIFEXITED(status)) {
@@ -46,8 +47,6 @@ int main(int argc, char* argv[]) {
 
       switch (child_pcb->state) {
         case INUSER:
-          child_pcb->state = INCALL;
-
           if (child_pcb->regs.orig_eax == SYS_open) {
             // filename is a pointer in the child process's address space
             char* child_filename = (char*)child_pcb->regs.ebx;
@@ -58,7 +57,16 @@ int main(int argc, char* argv[]) {
             // aren't long, so we can bail on the first NULL
             memcpy_from_child(child_pcb, filename, child_filename, 255);
           }
+          else if (child_pcb->regs.orig_eax == SYS_execve) {
+            char* child_filename = (char*)child_pcb->regs.ebx;
+            printf("execve %p %d\n", child_filename,
+                   ptrace(PTRACE_PEEKUSER, child_pcb->pid, 0, NULL));
+            //memcpy_from_child(child_pcb, filename, child_filename, 255);
+            //open_mode = O_RDONLY;
+          }
 
+
+          child_pcb->state = INCALL;
           EXITIF(ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL) < 0);
           break;
 

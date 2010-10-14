@@ -355,7 +355,7 @@ void copy_file(char* src_filename, char* dst_filename) {
   int inF;
   int outF;
   int bytes;
-  char buf[1024];
+  char buf[4096];
 
   EXITIF((inF = open(src_filename, O_RDONLY)) < 0);
   // create with permissive perms
