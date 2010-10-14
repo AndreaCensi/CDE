@@ -3,10 +3,10 @@
 #include "cde.h"
 
 
-// inject a system call to child (victim) process to tell it to attach
-// our shared memory segment
+// inject a system call in the child process to tell it to attach our
+// shared memory segment, so that it can read modified paths from there
 
-/* Setup a shared memory region within our victim process, then repeat the current system call. */
+// Setup a shared memory region within child process, then repeat current system call
 void setup_shmat(struct pcb* pcb) {
   int ret;
 
@@ -15,14 +15,11 @@ void setup_shmat(struct pcb* pcb) {
 
   pcb->state = INSHMAT;
 
-  /* The return value is actually stored in the victim address space. */
+  // The return value of shmat (attached address) is actually stored in
+  // the child's address space
   pcb->savedaddr = find_free_addr(pcb->pid, PROT_READ|PROT_WRITE, sizeof(int));
   pcb->savedword = ptrace(PTRACE_PEEKDATA, pcb->pid, pcb->savedaddr, 0);
-  if (errno) {
-    fprintf(stderr, "Can not peek at free address for %d in setup_shmat: %s\n", pcb->pid, strerror(errno));
-    sleep(100);
-    exit(1);
-  }
+  EXITIF(errno); // PTRACE_PEEKDATA reports error in errno
 
   /* The shmat call is implemented as a godawful sys_ipc. */
   pcb->regs.orig_eax = __NR_ipc;
@@ -35,23 +32,18 @@ void setup_shmat(struct pcb* pcb) {
   pcb->regs.ecx = pcb->shmid;
   pcb->regs.edx = 0; /* shmat flags */
   pcb->regs.esi = (long)pcb->savedaddr; /* Pointer to the return value in the
-                                           victim's address space. */
+                                           child's address space. */
   pcb->regs.edi = (long)NULL; /* We don't use shmat's shmaddr */
   pcb->regs.ebp = 0; /* The "fifth" argument is unused. */
 
-  ret = ptrace(PTRACE_SETREGS, pcb->pid, NULL, &pcb->regs);
-  if (ret < 0) {
-    fprintf(stderr, "%s: Could not set new registers for %d: %s\n",
-        __FUNCTION__, pcb->pid, __FILE__);
-    exit(1);
-  }
+  EXITIF(ptrace(PTRACE_SETREGS, pcb->pid, NULL, &pcb->regs) < 0);
+  EXITIF(ptrace(PTRACE_SYSCALL, pcb->pid, NULL, NULL) < 0); // keep listening
 }
 
 
 int main(int argc, char* argv[]) {
   pid_t child_pid;
   int status;
-  int ret;
 
   if (argc <= 1) {
     fprintf(stderr, "Error: empty command\n");
@@ -66,7 +58,7 @@ int main(int argc, char* argv[]) {
     char** target_program_argv = argv + 1;
     execvp(target_program_argv[0], target_program_argv);
 
-    /* If execv returns, it must have failed. */
+    // If execv returns, it must have failed
     fprintf(stderr, "Unknown command %s\n", target_program_argv[0]);
     exit(1);
   }
@@ -79,7 +71,6 @@ int main(int argc, char* argv[]) {
     char filename[255]; // hope this is big enough!
     char open_mode;
 
-    // create a fresh pcb and populate some of its fields:
     struct pcb* child_pcb = new_pcb(child_pid, INUSER);
     assert(child_pcb);
 
@@ -91,24 +82,17 @@ int main(int argc, char* argv[]) {
         break;
       }
 
-      ret = ptrace(PTRACE_GETREGS, child_pcb->pid, NULL, &child_pcb->regs);
-      if (ret < 0) {
-        fprintf(stderr, "ptrace getregs (pid = %d) at invocation: %s\n",
-            child_pcb->pid, strerror(errno));
-        exit(1);
-      }
-
-      //printf("state: %d\n", child_pcb->state);
+      // populates child_pcb->regs
+      EXITIF(ptrace(PTRACE_GETREGS, child_pcb->pid, NULL, &child_pcb->regs) < 0);
 
       switch (child_pcb->state) {
         case INUSER:
           child_pcb->state = INCALL;
 
           if (child_pcb->regs.orig_eax == SYS_open) {
-            // only do this ONCE per pcb on-demand
-            if (!child_pcb->victimshm) {
+            // only do this ONCE on-demand
+            if (!child_pcb->childshm) {
               setup_shmat(child_pcb);
-              ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL);
               break;
             }
 
@@ -121,70 +105,50 @@ int main(int argc, char* argv[]) {
             // aren't long, so we can bail on the first NULL
             memcpy_from_child(child_pcb, filename, child_filename, 255);
 
-            // try to redirect it to "/home/pgbovine/home_test.txt"
             if (strcmp(filename, "infile.txt") == 0) {
-              strcpy(child_pcb->localshm, "/home/pgbovine/home_test.txt");
+              strcpy(child_pcb->localshm, "infile2.txt");
               printf("shm = '%s'\n", child_pcb->localshm);
 
               // redirect the system call to the new path
               // TODO: should we restore ebx back to its original value
               // after we're done?
-              child_pcb->regs.ebx = (long)child_pcb->victimshm;
+              child_pcb->regs.ebx = (long)child_pcb->childshm;
               ptrace(PTRACE_SETREGS, child_pcb->pid, NULL, &child_pcb->regs);
             }
             else if (strcmp(filename, "/usr/lib/libpython2.5.so.1.0") == 0) {
               strcpy(child_pcb->localshm, "/home/pgbovine/ptrace-test/libs/libpython2.5.so.1.0");
 
               printf("shm = '%s'\n", child_pcb->localshm);
-              child_pcb->regs.ebx = (long)child_pcb->victimshm;
+              child_pcb->regs.ebx = (long)child_pcb->childshm;
               ptrace(PTRACE_SETREGS, child_pcb->pid, NULL, &child_pcb->regs);
             }
           }
 
-          status = ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL);
-          if (status < 0) {
-            fprintf (stderr, "Could not tell child to continue executing the syscall.\n");
-            exit(1);
-          }
+          EXITIF(ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL) < 0);
           break;
 
         case INSHMAT:
-
-          if (child_pcb->regs.eax != 0) {
-            fprintf(stderr, "Could not attach shared memory in the victim: %s\n",
-                    strerror(-child_pcb->regs.eax));
-            exit(1);
-          }
+          assert(child_pcb->regs.eax == 0);
 
           errno = 0;
-          child_pcb->victimshm = (void*)ptrace(PTRACE_PEEKDATA,
-                                               child_pcb->pid, child_pcb->savedaddr, 0);
-          if (errno) {
-            perror("Can not peek at shmat return");
-            exit(1);
-          }
+          child_pcb->childshm = (void*)ptrace(PTRACE_PEEKDATA,
+                                              child_pcb->pid, child_pcb->savedaddr, 0);
+          EXITIF(errno); // PTRACE_PEEKDATA reports error in errno
 
-          ret = ptrace(PTRACE_POKEDATA,
-                       child_pcb->pid, child_pcb->savedaddr, child_pcb->savedword);
-          if (ret) {
-            perror("Can not poke to restore savedword");
-            exit(1);
-          }
+          EXITIF(ptrace(PTRACE_POKEDATA,
+                        child_pcb->pid, child_pcb->savedaddr, child_pcb->savedword));
 
           memcpy(&child_pcb->regs, &child_pcb->orig_regs, sizeof(child_pcb->regs));
           child_pcb->regs.eax = child_pcb->regs.orig_eax;
 
+          // back up IP so that we can re-execute previous instruction
           child_pcb->regs.eip = child_pcb->orig_regs.eip - 2;
-          ret = ptrace(PTRACE_SETREGS, child_pcb->pid, NULL, &child_pcb->regs);
-          if (ret < 0) {
-            fprintf(stderr, "Could not setup new registers on forced return.\n");
-            exit(1);
-          }
+          EXITIF(ptrace(PTRACE_SETREGS, child_pcb->pid, NULL, &child_pcb->regs) < 0);
 
-          assert(child_pcb->victimshm);
+          assert(child_pcb->childshm);
 
           child_pcb->state = INUSER;
-          ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL);
+          EXITIF(ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL) < 0);
           break;
 
         case INCALL:
@@ -203,11 +167,12 @@ int main(int argc, char* argv[]) {
           }
 
           child_pcb->state = INUSER;
-          ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL);
+          EXITIF(ptrace(PTRACE_SYSCALL, child_pcb->pid, NULL, NULL) < 0);
           break;
 
         default:
           assert(0);
+          break;
       }
     }
 
@@ -216,3 +181,4 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
+

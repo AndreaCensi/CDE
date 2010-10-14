@@ -30,6 +30,15 @@
 #define PATH_MAX 4096
 
 
+// like an assert except that it always fires
+#define EXITIF(x) do { \
+  if (x) { \
+    fprintf(stderr, "Fatal error in %s [%s:%d]\n", __FUNCTION__, __FILE__, __LINE__); \
+    exit(1); \
+  } \
+} while(0)
+
+
 // TODO: these components from Goanna might come in handy later
 
 /* A structure to represent paths. */
@@ -79,19 +88,17 @@ struct pcb {
     int noforceret;
 
     /* These are not used at the same time. */
-    union
-    {
-	/* This structure is used by shmat, but is general enough for everyone. */
-	struct
-        {
-		long savedword;
-		void *savedaddr;
-	};
-	/* This is used by mmap2. */
-	struct mapped_region *curregion;
-	/* This differentiates normal from not-normal execs. */
-	int fakeexec;
-	/* Our potentially opened fd_struct. */
+    union {
+    /* This structure is used by shmat, but is general enough for everyone. */
+      struct {
+        long savedword;
+        void *savedaddr;
+      };
+      /* This is used by mmap2. */
+      struct mapped_region *curregion;
+      /* This differentiates normal from not-normal execs. */
+      int fakeexec;
+      /* Our potentially opened fd_struct. */
     };
 
     /* This is a temporary holder for the file structure we want to open. */
@@ -102,8 +109,8 @@ struct pcb {
 
     /* Information about the shared segment. */
     int shmid;
-    char *localshm;
-    void *victimshm;
+    char *localshm; // address in our address space
+    void *childshm; // address in CHILD's address space
     int shmat_nextstate;
 
     /* Status variable. */

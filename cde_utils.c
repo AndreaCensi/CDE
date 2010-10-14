@@ -52,6 +52,7 @@ void memcpy_from_child(struct pcb *pcb, void* dest, void* src, size_t n) {
 }
 
 
+// TODO: this is probably Linux-specific ;)
 void* find_free_addr(int pid, int prot, unsigned long size) {
   FILE *f;
   char filename[20];
@@ -133,7 +134,7 @@ struct pcb* new_pcb(int pid, int state) {
     exit(1);
   }
 
-  ret->victimshm = NULL;
+  ret->childshm = NULL;
 
   return ret;
 }
