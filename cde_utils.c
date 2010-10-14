@@ -349,3 +349,23 @@ struct path* str2path(char* path) {
   return base;
 }
 
+
+// primitive file copy (TODO: optimize if necessary)
+void copy_file(char* src_filename, char* dst_filename) {
+  int inF;
+  int outF;
+  int bytes;
+  char buf[1024];
+
+  EXITIF((inF = open(src_filename, O_RDONLY)) < 0);
+  // create with permissive perms
+  EXITIF((outF = open(dst_filename, O_WRONLY | O_CREAT, 0777)) < 0);
+
+  while ((bytes = read(inF, buf, sizeof(buf))) > 0) {
+    write(outF, buf, bytes);
+  }
+    
+  close(inF);
+  close(outF);
+}
+

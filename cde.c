@@ -79,6 +79,9 @@ int main(int argc, char* argv[]) {
                 // TODO: this isn't a perfect assumption since a
                 // relative path could be something like '../data.txt',
                 // which this won't pick up :)
+                //   WOW, this libc function seems useful for
+                //   canonicalizing filenames:
+                //     char* canonicalize_file_name (const char *name)
                 if (filename[0] == '/') {
                   // modify filename so that it appears as a RELATIVE PATH
                   // within a cde-root/ sub-directory
@@ -88,11 +91,28 @@ int main(int argc, char* argv[]) {
 
                   struct path* p = str2path(rel_path);
                   path_pop(p); // ignore filename portion to leave just the dirname
-                  char* s2 = path2str(p, 0);
-                  printf("%s\n%s\n\n", rel_path, s2);
+
+                  // now mkdir all directories specified in rel_path
+                  int i;
+                  for (i = 1; i <= p->depth; i++) {
+                    char* dn = path2str(p, i);
+                    mkdir(dn, 0777);
+                    free(dn);
+                  }
+
+                  // finally, 'copy' filename over to rel_path
+                  // 1.) try a hard link for efficiency
+                  // 2.) if that fails, then do a straight-up copy 
+                  //     TODO: can optimize by first checking md5sum or
+                  //     something before copying
+
+                  // EEXIST means the file already exists, which isn't
+                  // really a hard link failure ...
+                  if (link(filename, rel_path) && (errno != EEXIST)) {
+                    copy_file(filename, rel_path);
+                  }
 
                   delete_path(p);
-                  free(s2);
                   free(rel_path);
                 }
               }

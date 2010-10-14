@@ -129,6 +129,7 @@ void memcpy_from_child(struct pcb *pcb, void* dest, void* src, size_t n);
 void* find_free_addr(int pid, int exec, unsigned long size);
 struct pcb* new_pcb(int pid, int state);
 void delete_pcb(struct pcb *pcb);
+void copy_file(char* src_filename, char* dst_filename);
 
 
 /* A structure to represent paths. */
