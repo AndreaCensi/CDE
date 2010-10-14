@@ -58,19 +58,27 @@ int main(int argc, char* argv[]) {
   char** p_s = paths;
   while (*p_s) {
     struct path* p = str2path(*p_s);
-    char* s_dup = path2str(p);
 
-    struct path* p_dup = path_dup(p);
-    char* s_dup2 = path2str(p_dup);
+    int i;
+    for (i = 0; i <= p->depth; i++) {
+      char* s_dup = path2str(p, i);
 
-    printf("%s (%d)\n", s_dup, p->depth);
-    assert(strcmp(*p_s, s_dup) == 0);
-    assert(strcmp(s_dup, s_dup2) == 0);
+      struct path* p_dup = path_dup(p);
+      char* s_dup2 = path2str(p_dup, i);
 
-    free(s_dup);
-    free(s_dup2);
+      printf("%s (%d)\n", s_dup, p->depth);
+      if (i == 0) {
+        assert(strcmp(*p_s, s_dup) == 0);
+      }
+      assert(strcmp(s_dup, s_dup2) == 0);
+
+      free(s_dup);
+      free(s_dup2);
+      delete_path(p_dup);
+    }
+    printf("\n");
+
     delete_path(p);
-    delete_path(p_dup);
     p_s++;
   }
 

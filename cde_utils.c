@@ -213,12 +213,18 @@ void delete_path(struct path *path) {
 }
 
 
-// mallocs a new string
-char* path2str(struct path* path) {
+// mallocs a new string and populates it with up to
+// 'depth' path components (if depth is 0, uses entire path)
+char* path2str(struct path* path, int depth) {
   int i;
   int destlen = 1;
 
-  for (i = 0; i < path->depth; i++) {
+  // simply use path->depth if depth is out of range
+  if (depth <= 0 || depth > path->depth) {
+    depth = path->depth;
+  }
+
+  for (i = 0; i < depth; i++) {
     destlen += path->stack[i]->len + 1;
   }
 
@@ -232,14 +238,14 @@ char* path2str(struct path* path) {
     destlen--;
   }
 
-  for (i = 0; path->stack[i]; i++) {
+  for (i = 0; i < depth; i++) {
     assert(destlen >= path->stack[i]->len + 1);
 
     memcpy(dest, path->stack[i]->str, path->stack[i]->len);
     dest += path->stack[i]->len;
     destlen -= path->stack[i]->len;
 
-    if (path->stack[i + 1]) { // do we have a successor?
+    if (i < depth - 1) { // do we have a successor?
       assert(destlen >= 2);
       *dest++ = '/';
       destlen--;
@@ -249,6 +255,17 @@ char* path2str(struct path* path) {
   *dest = '\0';
 
   return ret;
+}
+
+// pop the last element of path
+void path_pop(struct path* p) {
+  if (p->depth == 0) {
+    return;
+  }
+
+  free(p->stack[p->depth-1]);
+  p->stack[p->depth-1] = NULL;
+  p->depth--;
 }
 
 // mallocs a new path object, must free using delete_path(),
@@ -330,83 +347,5 @@ struct path* str2path(char* path) {
 
   free(path_dup_base);
   return base;
-}
-
-
-// stolen from:
-// http://stackoverflow.com/questions/2336242/recursive-mkdir-system-call-on-unix
-//
-/* Make all the directories leading up to PATH, then create PATH.  Note that
-   this changes the process's umask; make sure that all paths leading to a
-   return reset it to ORIGINAL_UMASK */
-int mkdir_recursive(char* path, int nmode, int parent_mode) {
-  int oumask;
-  struct stat sb;
-  char *p, *npath;
-
-  if (stat (path, &sb) == 0)
-    {
-      if (S_ISDIR (sb.st_mode) == 0)
-    {
-      //builtin_error ("`%s': file exists but is not a directory", path);
-      return 1;
-    }
-
-      if (chmod (path, nmode))
-        {
-          //builtin_error ("%s: %s", path, strerror (errno));
-          return 1;
-        }
-
-      return 0;
-    }
-
-  oumask = umask (0);
-  //npath = savestring (path);    /* So we can write to it. */
-
-  /* Check whether or not we need to do anything with intermediate dirs. */
-
-  /* Skip leading slashes. */
-  p = npath;
-  while (*p == '/')
-    p++;
-
-  while ((p = strchr (p, '/'))) {
-    *p = '\0';
-      if (stat (npath, &sb) != 0)
-    {
-      if (mkdir (npath, parent_mode))
-        {
-          //builtin_error ("cannot create directory `%s': %s", npath, strerror (errno));
-          //umask (original_umask);
-          free (npath);
-          return 1;
-        }
-    }
-      else if (S_ISDIR (sb.st_mode) == 0)
-        {
-          //builtin_error ("`%s': file exists but is not a directory", npath);
-          //umask (original_umask);
-          free (npath);
-          return 1;
-        }
-
-      *p++ = '/';   /* restore slash */
-      while (*p == '/')
-    p++;
-    }
-
-  /* Create the final directory component. */
-  if (stat (npath, &sb) && mkdir (npath, nmode))
-    {
-      //builtin_error ("cannot create directory `%s': %s", npath, strerror (errno));
-      //umask (original_umask);
-      free (npath);
-      return 1;
-    }
-
-  //umask (original_umask);
-  free (npath);
-  return 0;
 }
 

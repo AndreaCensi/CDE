@@ -73,19 +73,28 @@ int main(int argc, char* argv[]) {
               EXITIF(stat(filename, &st));
               // check whether it's a REGULAR-ASS file
               if (S_ISREG(st.st_mode)) {
-                struct path* p = str2path(filename);
-
                 // assume that relative paths are in working directory,
                 // so no need to grab those files
                 //
                 // TODO: this isn't a perfect assumption since a
                 // relative path could be something like '../data.txt',
                 // which this won't pick up :)
-                if (p->is_abspath) {
-                  printf("%s\n", filename);
-                }
+                if (filename[0] == '/') {
+                  // modify filename so that it appears as a RELATIVE PATH
+                  // within a cde-root/ sub-directory
+                  char* rel_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+                  strcpy(rel_path, "cde-root");
+                  strcat(rel_path, filename);
 
-                delete_path(p);
+                  struct path* p = str2path(rel_path);
+                  path_pop(p); // ignore filename portion to leave just the dirname
+                  char* s2 = path2str(p, 0);
+                  printf("%s\n%s\n\n", rel_path, s2);
+
+                  delete_path(p);
+                  free(s2);
+                  free(rel_path);
+                }
               }
             }
           }

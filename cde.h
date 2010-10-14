@@ -145,10 +145,11 @@ struct path {
 };
 
 struct path* str2path(char* path);
-char* path2str(struct path* path);
+char* path2str(struct path* path, int depth);
 struct path* path_dup(struct path* path);
 struct path *new_path();
 void delete_path(struct path *path);
+void path_pop(struct path* p);
 
 
 #endif // _CDE_H
