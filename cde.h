@@ -23,6 +23,7 @@
 #include <sys/mman.h>
 #include <linux/ipc.h>
 #include <linux/shm.h>
+#include <sys/stat.h>
 
 
 #define FILEBACK 8 /* It is OK to use a file backed region. */
@@ -37,28 +38,6 @@
     exit(1); \
   } \
 } while(0)
-
-
-// TODO: these components from Goanna might come in handy later
-
-/* A structure to represent paths. */
-struct namecomp {
-    int len;
-    char str[0];
-};
-
-struct path {
-    int stacksize;
-    int depth;
-    struct namecomp **stack;
-};
-
-struct path *str2path(struct path *base, char *path);
-char *path2str(struct path *path, char *dest, int destlen);
-void empty_path(struct path *path);
-void dup_path(struct path *dstpath, struct path *srcpath);
-struct path *new_path();
-void free_path(struct path *path);
 
 
 // abbreviated version of pcb from Goanna ... add more fields if necessary
@@ -145,5 +124,26 @@ void memcpy_from_child(struct pcb *pcb, void* dest, void* src, size_t n);
 void* find_free_addr(int pid, int exec, unsigned long size);
 struct pcb* new_pcb(int pid, int state);
 void delete_pcb(struct pcb *pcb);
+
+
+/* A structure to represent paths. */
+struct namecomp {
+  int len;
+  char str[0];
+};
+
+struct path {
+  int stacksize;
+  int depth;
+  int is_abspath; // 1 if absolute path (starts with '/'), 0 if relative path
+  struct namecomp **stack;
+};
+
+struct path* str2path(char* path);
+char* path2str(struct path* path);
+void dup_path(struct path *dstpath, struct path *srcpath);
+struct path *new_path();
+void delete_path(struct path *path);
+
 
 #endif // _CDE_H

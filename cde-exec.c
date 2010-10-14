@@ -7,7 +7,7 @@
 // shared memory segment, so that it can read modified paths from there
 
 // Setup a shared memory region within child process, then repeat current system call
-void setup_shmat(struct pcb* pcb) {
+static void setup_shmat(struct pcb* pcb) {
   int ret;
 
   // stash away original registers so that we can restore them later

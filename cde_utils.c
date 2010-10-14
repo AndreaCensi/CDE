@@ -144,3 +144,271 @@ void delete_pcb(struct pcb *pcb) {
   free(pcb);
 }
 
+
+// manipulating paths (courtesy of Goanna)
+
+static void empty_path(struct path *path) {
+  int pos = 0;
+  path->depth = 0;
+  if (path->stack) {
+    while (path->stack[pos]) {
+      free(path->stack[pos]);
+      path->stack[pos] = NULL;
+      pos++;
+    }
+  }
+}
+
+void dup_path(struct path *dstpath, struct path *srcpath) {
+  int pos = 0;
+
+  empty_path(dstpath);
+
+  if (dstpath->stacksize < srcpath->stacksize) {
+    dstpath->stack =
+      (struct namecomp**)realloc(dstpath->stack,
+                                 sizeof(struct namecomp*) * srcpath->stacksize);
+    assert(dstpath->stack);
+    dstpath->stacksize = srcpath->stacksize;
+  }
+  dstpath->depth = srcpath->depth;
+  dstpath->is_abspath = srcpath->is_abspath;
+
+  while (srcpath->stack[pos]) {
+    dstpath->stack[pos] =
+      (struct namecomp*)malloc(sizeof(struct namecomp) + 
+                               strlen(srcpath->stack[pos]->str) + 1);
+    assert(dstpath->stack[pos]);
+    dstpath->stack[pos]->len = srcpath->stack[pos]->len;
+    strcpy(dstpath->stack[pos]->str, srcpath->stack[pos]->str);
+    pos++;
+  }
+  dstpath->stack[pos] = NULL;
+}
+
+struct path *new_path() {
+  struct path* ret = (struct path *)malloc(sizeof(struct path));
+  assert(ret);
+
+  ret->stacksize = 1;
+  ret->depth = 0;
+  ret->is_abspath = 0;
+  ret->stack = (struct namecomp **)malloc(sizeof(struct namecomp *));
+  assert(ret->stack);
+  ret->stack[0] = NULL;
+  return ret;
+}
+
+void delete_path(struct path *path) {
+  assert(path);
+  if (path->stack) {
+    int pos = 0;
+    while (path->stack[pos]) {
+      free(path->stack[pos]);
+      path->stack[pos] = NULL;
+      pos++;
+    }
+    free(path->stack);
+  }
+  free(path);
+}
+
+
+// mallocs a new string
+char* path2str(struct path* path) {
+  int i;
+  int destlen = 1;
+
+  for (i = 0; i < path->depth; i++) {
+    destlen += path->stack[i]->len + 1;
+  }
+
+  char* dest = (char *)malloc(destlen);
+
+  char* ret = dest;
+  assert(destlen >= 2);
+
+  if (path->is_abspath) {
+    *dest++ = '/';
+    destlen--;
+  }
+
+  for (i = 0; path->stack[i]; i++) {
+    assert(destlen >= path->stack[i]->len + 1);
+
+    memcpy(dest, path->stack[i]->str, path->stack[i]->len);
+    dest += path->stack[i]->len;
+    destlen -= path->stack[i]->len;
+
+    if (path->stack[i + 1]) { // do we have a successor?
+      assert(destlen >= 2);
+      *dest++ = '/';
+      destlen--;
+    }
+  }
+
+  *dest = '\0';
+
+  return ret;
+}
+
+// mallocs a new path object, must free using delete_path(),
+// NOT using ordinary free()
+struct path* str2path(char* path) {
+  int stackleft;
+
+  path = strdup(path); // so that we don't clobber the original
+  char* path_dup_base = path; // for free()
+
+  struct path* base = new_path();
+
+  if (*path == '/') { // absolute path?
+    base->is_abspath = 1;
+    empty_path(base);
+    path++;
+  }
+  else {
+    base->is_abspath = 0;
+  }
+
+  stackleft = base->stacksize - base->depth - 1;
+
+  do {
+    char *p;
+    while (stackleft <= 1) {
+      base->stacksize *= 2;
+      stackleft = base->stacksize / 2;
+      base->stacksize++;
+      stackleft++;
+      base->stack =
+        (struct namecomp **)realloc(base->stack, base->stacksize * sizeof(struct namecomp*));
+      assert(base->stack);
+    }
+
+    // Skip multiple adjoining slashes
+    while (*path == '/') {
+      path++;
+    }
+
+    p = strchr(path, '/');
+    // put a temporary stop-gap ... uhhh, this assumes path isn't read-only
+    if (p) {
+      *p = '\0';
+    }
+
+    if (path[0] == '\0') {
+      base->stack[base->depth] = NULL;
+      // We are at the end (or root), do nothing.
+    }
+    else if (!strcmp(path, ".")) {
+      base->stack[base->depth] = NULL;
+      // This doesn't change anything.
+    }
+    else if (!strcmp(path, "..")) {
+      if (base->depth > 0) {
+        free(base->stack[--base->depth]);
+        base->stack[base->depth] = NULL;
+        stackleft++;
+      }
+    }
+    else {
+      base->stack[base->depth] =
+        (struct namecomp *)malloc(sizeof(struct namecomp) + strlen(path) + 1);
+      assert(base->stack[base->depth]);
+      strcpy(base->stack[base->depth]->str, path);
+      base->stack[base->depth]->len = strlen(path);
+      base->depth++;
+      base->stack[base->depth] = NULL;
+      stackleft--;
+    }
+
+    // Put it back the way it was
+    if (p) {
+      *p++ = '/';
+    }
+    path = p;
+  } while (path);
+
+  free(path_dup_base);
+  return base;
+}
+
+
+// stolen from:
+// http://stackoverflow.com/questions/2336242/recursive-mkdir-system-call-on-unix
+//
+/* Make all the directories leading up to PATH, then create PATH.  Note that
+   this changes the process's umask; make sure that all paths leading to a
+   return reset it to ORIGINAL_UMASK */
+int mkdir_recursive(char* path, int nmode, int parent_mode) {
+  int oumask;
+  struct stat sb;
+  char *p, *npath;
+
+  if (stat (path, &sb) == 0)
+    {
+      if (S_ISDIR (sb.st_mode) == 0)
+    {
+      //builtin_error ("`%s': file exists but is not a directory", path);
+      return 1;
+    }
+
+      if (chmod (path, nmode))
+        {
+          //builtin_error ("%s: %s", path, strerror (errno));
+          return 1;
+        }
+
+      return 0;
+    }
+
+  oumask = umask (0);
+  //npath = savestring (path);    /* So we can write to it. */
+
+  /* Check whether or not we need to do anything with intermediate dirs. */
+
+  /* Skip leading slashes. */
+  p = npath;
+  while (*p == '/')
+    p++;
+
+  while (p = strchr (p, '/'))
+    {
+      *p = '\0';
+      if (stat (npath, &sb) != 0)
+    {
+      if (mkdir (npath, parent_mode))
+        {
+          //builtin_error ("cannot create directory `%s': %s", npath, strerror (errno));
+          //umask (original_umask);
+          free (npath);
+          return 1;
+        }
+    }
+      else if (S_ISDIR (sb.st_mode) == 0)
+        {
+          //builtin_error ("`%s': file exists but is not a directory", npath);
+          //umask (original_umask);
+          free (npath);
+          return 1;
+        }
+
+      *p++ = '/';   /* restore slash */
+      while (*p == '/')
+    p++;
+    }
+
+  /* Create the final directory component. */
+  if (stat (npath, &sb) && mkdir (npath, nmode))
+    {
+      //builtin_error ("cannot create directory `%s': %s", npath, strerror (errno));
+      //umask (original_umask);
+      free (npath);
+      return 1;
+    }
+
+  //umask (original_umask);
+  free (npath);
+  return 0;
+}
+
