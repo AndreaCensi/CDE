@@ -66,14 +66,26 @@ int main(int argc, char* argv[]) {
           if (child_pcb->regs.orig_eax == SYS_open) {
             // a non-negative return value means that a VALID file
             // descriptor was returned (i.e., the file actually exists)
-            // only grab info for files opened in read mode
+            // also, only grab info for files opened in read mode
             if ((child_pcb->regs.eax >= 0) &&
                 (open_mode == O_RDONLY || open_mode == O_RDWR)) {
               struct stat st;
               EXITIF(stat(filename, &st));
               // check whether it's a REGULAR-ASS file
               if (S_ISREG(st.st_mode)) {
-                printf("  open('%s') = %ld\n", filename, child_pcb->regs.eax);
+                struct path* p = str2path(filename);
+
+                // assume that relative paths are in working directory,
+                // so no need to grab those files
+                //
+                // TODO: this isn't a perfect assumption since a
+                // relative path could be something like '../data.txt',
+                // which this won't pick up :)
+                if (p->is_abspath) {
+                  printf("%s\n", filename);
+                }
+
+                delete_path(p);
               }
             }
           }

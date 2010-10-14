@@ -159,31 +159,30 @@ static void empty_path(struct path *path) {
   }
 }
 
-void dup_path(struct path *dstpath, struct path *srcpath) {
+// mallocs a new path object, must free using delete_path(),
+// NOT using ordinary free()
+struct path* path_dup(struct path* path) {
+  struct path* ret = (struct path *)malloc(sizeof(struct path));
+  assert(ret);
+
+  ret->stacksize = path->stacksize;
+  ret->depth = path->depth;
+  ret->is_abspath = path->is_abspath;
+  ret->stack = (struct namecomp**)malloc(sizeof(struct namecomp*) * ret->stacksize);
+  assert(ret->stack);
+
   int pos = 0;
-
-  empty_path(dstpath);
-
-  if (dstpath->stacksize < srcpath->stacksize) {
-    dstpath->stack =
-      (struct namecomp**)realloc(dstpath->stack,
-                                 sizeof(struct namecomp*) * srcpath->stacksize);
-    assert(dstpath->stack);
-    dstpath->stacksize = srcpath->stacksize;
-  }
-  dstpath->depth = srcpath->depth;
-  dstpath->is_abspath = srcpath->is_abspath;
-
-  while (srcpath->stack[pos]) {
-    dstpath->stack[pos] =
-      (struct namecomp*)malloc(sizeof(struct namecomp) + 
-                               strlen(srcpath->stack[pos]->str) + 1);
-    assert(dstpath->stack[pos]);
-    dstpath->stack[pos]->len = srcpath->stack[pos]->len;
-    strcpy(dstpath->stack[pos]->str, srcpath->stack[pos]->str);
+  while (path->stack[pos]) {
+    ret->stack[pos] =
+      (struct namecomp*)malloc(sizeof(struct namecomp) +
+                               strlen(path->stack[pos]->str) + 1);
+    assert(ret->stack[pos]);
+    ret->stack[pos]->len = path->stack[pos]->len;
+    strcpy(ret->stack[pos]->str, path->stack[pos]->str);
     pos++;
   }
-  dstpath->stack[pos] = NULL;
+  ret->stack[pos] = NULL;
+  return ret;
 }
 
 struct path *new_path() {
@@ -372,9 +371,8 @@ int mkdir_recursive(char* path, int nmode, int parent_mode) {
   while (*p == '/')
     p++;
 
-  while (p = strchr (p, '/'))
-    {
-      *p = '\0';
+  while ((p = strchr (p, '/'))) {
+    *p = '\0';
       if (stat (npath, &sb) != 0)
     {
       if (mkdir (npath, parent_mode))

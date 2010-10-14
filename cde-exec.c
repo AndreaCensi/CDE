@@ -8,8 +8,6 @@
 
 // Setup a shared memory region within child process, then repeat current system call
 static void setup_shmat(struct pcb* pcb) {
-  int ret;
-
   // stash away original registers so that we can restore them later
   memcpy(&pcb->orig_regs, &pcb->regs, sizeof(pcb->orig_regs));
 

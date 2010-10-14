@@ -1,4 +1,4 @@
-CC=gcc -O0 -g
+CC=gcc -O0 -g -Wall
 
 all: cde cde-exec paths-test
 

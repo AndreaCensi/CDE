@@ -25,6 +25,11 @@
 #include <linux/shm.h>
 #include <sys/stat.h>
 
+// to shut up gcc warnings without causing nasty #include conflicts
+int shmget(key_t key, size_t size, int shmflg);
+void *shmat(int shmid, const void *shmaddr, int shmflg);
+int shmdt(const void *shmaddr);
+int shmctl(int shmid, int cmd, struct shmid_ds *buf);
 
 #define FILEBACK 8 /* It is OK to use a file backed region. */
 
@@ -133,15 +138,15 @@ struct namecomp {
 };
 
 struct path {
-  int stacksize;
-  int depth;
+  int stacksize; // num elts in stack
+  int depth;     // actual depth of path (smaller than stacksize)
   int is_abspath; // 1 if absolute path (starts with '/'), 0 if relative path
   struct namecomp **stack;
 };
 
 struct path* str2path(char* path);
 char* path2str(struct path* path);
-void dup_path(struct path *dstpath, struct path *srcpath);
+struct path* path_dup(struct path* path);
 struct path *new_path();
 void delete_path(struct path *path);
 
