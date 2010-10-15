@@ -86,6 +86,11 @@ extern char **environ;
 extern int optind;
 extern char *optarg;
 
+// pgbovine
+extern char CDE_exec_mode;
+extern void alloc_tcb_CDE_fields(struct tcb* tcp);
+extern void free_tcb_CDE_fields(struct tcb* tcp);
+
 
 int debug = 0, followfork = 0;
 int dtime = 0, xflag = 0, qflag = 0;
@@ -174,7 +179,11 @@ int exitval;
 {
 	fprintf(ofp, "\
 Modified by Philip Guo (pg@cs.stanford.edu) for the CDE project\n\
-(some options might not work as expected)\n\
+\n\
+CDE options:\n\
+  -e Execute CDE package in sandbox\n\
+\n\
+(the options below might not work as expected)\n\
 \n\
 usage: strace [-dffhiqrtttTvVxx] [-a column] [-e expr] ... [-o file]\n\
               [-p pid] ... [-s strsize] [-u username] [-E var=val] ...\n\
@@ -734,11 +743,11 @@ main(int argc, char *argv[])
 	qualify("verbose=all");
 	qualify("signal=all");
 	while ((c = getopt(argc, argv,
-		"+cCdfFhiqrtTvVxz"
+		"+cCedfFhiqrtTvVxz"
 #ifndef USE_PROCFS
 		"D"
 #endif
-		"a:e:o:O:p:s:S:u:E:")) != EOF) {
+		"a:o:O:p:s:S:u:E:")) != EOF) {
 		switch (c) {
 		case 'c':
 			if (cflag == CFLAG_BOTH) {
@@ -807,7 +816,10 @@ main(int argc, char *argv[])
 			acolumn = atoi(optarg);
 			break;
 		case 'e':
-			qualify(optarg);
+      // pgbovine - hijack '-e' option for a different purpose than
+      // strace intended
+      CDE_exec_mode = 1;
+			//qualify(optarg);
 			break;
 		case 'o':
 			outfname = strdup(optarg);
@@ -1044,6 +1056,9 @@ alloc_tcb(int pid, int command_options_parsed)
 			tcp->stime.tv_sec = 0;
 			tcp->stime.tv_usec = 0;
 			tcp->pfd = -1;
+
+      alloc_tcb_CDE_fields(tcp); // pgbovine
+
 			nprocs++;
 			if (command_options_parsed)
 				newoutf(tcp);
@@ -1447,6 +1462,8 @@ struct tcb *tcp;
 		fclose(tcp->outf);
 
 	tcp->outf = 0;
+
+  free_tcb_CDE_fields(tcp); // pgbovine
 }
 
 #ifndef USE_PROCFS

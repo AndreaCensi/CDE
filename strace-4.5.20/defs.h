@@ -83,6 +83,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <sys/user.h> // pgbovine
 
 #ifdef HAVE_STDBOOL_H
 #include <stdbool.h>
@@ -353,7 +354,17 @@ struct tcb {
 #endif
 
   // new fields added by pgbovine
+  // handle memory management in alloc_tcb_CDE_fields() and free_tcb_CDE_fields()
   char* opened_filename; // non-null during a call when a file has been opened
+
+  // Fields pertaining to the shared memory segment,
+  // which is only valid when CDE_exec_mode option is 1
+  int shmid;
+  char *localshm; // address in our address space
+  void *childshm; // address in child's address space
+  struct user_regs_struct saved_regs;
+  long savedword;
+  void *savedaddr;
 };
 
 /* TCB flags */

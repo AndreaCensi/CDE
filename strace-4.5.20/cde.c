@@ -1,5 +1,35 @@
 #include "cde.h"
 
+// 1 if we are executing code in a CDE package,
+// 0 for tracing regular execution
+char CDE_exec_mode;
+
+static void setup_shmat(struct tcb* tcp);
+static void* find_free_addr(int pid, int exec, unsigned long size);
+static void lazy_copy_file(char* src_filename, char* dst_filename);
+
+
+/* A structure to represent paths. */
+struct namecomp {
+  int len;
+  char str[0];
+};
+
+struct path {
+  int stacksize; // num elts in stack
+  int depth;     // actual depth of path (smaller than stacksize)
+  int is_abspath; // 1 if absolute path (starts with '/'), 0 if relative path
+  struct namecomp **stack;
+};
+
+struct path* str2path(char* path);
+char* path2str(struct path* path, int depth);
+struct path* path_dup(struct path* path);
+struct path *new_path();
+void delete_path(struct path *path);
+void path_pop(struct path* p);
+
+
 static void add_file_dependency(struct tcb* tcp) {
   char* filename = tcp->opened_filename;
   assert(filename);
@@ -55,51 +85,76 @@ static void add_file_dependency(struct tcb* tcp) {
 static char path[MAXPATHLEN + 1]; 
 
 void CDE_begin_file_open(struct tcb* tcp) {
-  // only track files opened in read-only or read-write mode:
-  char open_mode = (tcp->u_arg[1] & 0x3);
-  if (open_mode == O_RDONLY || open_mode == O_RDWR) {
+  if (CDE_exec_mode) {
+    if (!tcp->childshm) {
+      setup_shmat(tcp);
+    }
+  }
+  else {
+    // only track files opened in read-only or read-write mode:
+    char open_mode = (tcp->u_arg[1] & 0x3);
+    if (open_mode == O_RDONLY || open_mode == O_RDWR) {
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+      assert(!tcp->opened_filename);
+      tcp->opened_filename = strdup(path);
+    }
+  }
+}
+
+void CDE_end_file_open(struct tcb* tcp) {
+  if (CDE_exec_mode) {
+
+  }
+  else {
+    if (!tcp->opened_filename) {
+      return;
+    }
+       
+    // a non-negative return value means that the call returned
+    // successfully with a known file descriptor
+    if (tcp->u_rval >= 0) {
+      add_file_dependency(tcp);
+    }
+
+    free(tcp->opened_filename);
+    tcp->opened_filename = NULL;
+  }
+}
+
+void CDE_begin_execve(struct tcb* tcp) {
+  if (CDE_exec_mode) {
+
+  }
+  else {
     EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
     assert(!tcp->opened_filename);
     tcp->opened_filename = strdup(path);
   }
 }
 
-void CDE_end_file_open(struct tcb* tcp) {
-  if (!tcp->opened_filename) {
-    return;
-  }
-     
-  // a non-negative return value means that the call returned
-  // successfully with a known file descriptor
-  if (tcp->u_rval >= 0) {
-    add_file_dependency(tcp);
-  }
-
-  free(tcp->opened_filename);
-  tcp->opened_filename = NULL;
-}
-
-void CDE_begin_execve(struct tcb* tcp) {
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  assert(!tcp->opened_filename);
-  tcp->opened_filename = strdup(path);
-}
-
 void CDE_end_execve(struct tcb* tcp) {
-  assert(tcp->opened_filename);
- 
-  // a return value of 0 means success
-  if (tcp->u_rval == 0) {
-    add_file_dependency(tcp);
-  }
+  if (CDE_exec_mode) {
 
-  free(tcp->opened_filename);
-  tcp->opened_filename = NULL;
+  }
+  else {
+    assert(tcp->opened_filename);
+   
+    // a return value of 0 means success
+    if (tcp->u_rval == 0) {
+      add_file_dependency(tcp);
+    }
+
+    free(tcp->opened_filename);
+    tcp->opened_filename = NULL;
+  }
 }
 
+
+// from Goanna
+#define FILEBACK 8 /* It is OK to use a file backed region. */
 
 // TODO: this is probably Linux-specific ;)
-void* find_free_addr(int pid, int prot, unsigned long size) {
+static void* find_free_addr(int pid, int prot, unsigned long size) {
   FILE *f;
   char filename[20];
   char s[80];
@@ -144,50 +199,6 @@ void* find_free_addr(int pid, int prot, unsigned long size) {
   fclose(f);
 
   return NULL;
-}
-
-
-struct pcb* new_pcb(int pid, int state) {
-  key_t key;
-  struct pcb* ret;
-
-  ret = (struct pcb*)malloc(sizeof(*ret));
-  if (!ret) {
-    return NULL;
-  }
-
-  memset(ret, 0, sizeof(*ret));
-
-  ret->pid = pid;
-  ret->state = state;
-  ret->prime_fd = -1;
-
-  // randomly probe for a valid shm key
-  do {
-    errno = 0;
-    key = rand();
-    ret->shmid = shmget(key, PATH_MAX * 2, IPC_CREAT|IPC_EXCL|0600);
-  } while (ret->shmid == -1 && errno == EEXIST);
-
-  ret->localshm = (char*)shmat(ret->shmid, NULL, 0);
-  if ((int)ret->localshm == -1) {
-    perror("shmat");
-    exit(1);
-  }
-
-  if (shmctl(ret->shmid, IPC_RMID, NULL) == -1) {
-    perror("shmctl(IPC_RMID)");
-    exit(1);
-  }
-
-  ret->childshm = NULL;
-
-  return ret;
-}
-
-void delete_pcb(struct pcb *pcb) {
-  shmdt(pcb->localshm);
-  free(pcb);
 }
 
 
@@ -398,7 +409,7 @@ struct path* str2path(char* path) {
 
 // if modtime($dst_filename) < modtime($src_filename):
 //   cp $src_filename $dst_filename
-void lazy_copy_file(char* src_filename, char* dst_filename) {
+static void lazy_copy_file(char* src_filename, char* dst_filename) {
   int inF;
   int outF;
   int bytes;
@@ -429,5 +440,84 @@ void lazy_copy_file(char* src_filename, char* dst_filename) {
     
   close(inF);
   close(outF);
+}
+
+
+void alloc_tcb_CDE_fields(struct tcb* tcp) {
+  tcp->localshm = NULL;
+  tcp->childshm = NULL;
+
+  if (CDE_exec_mode) {
+    key_t key;
+    // randomly probe for a valid shm key
+    do {
+      errno = 0;
+      key = rand();
+      tcp->shmid = shmget(key, PATH_MAX * 2, IPC_CREAT|IPC_EXCL|0600);
+    } while (tcp->shmid == -1 && errno == EEXIST);
+
+    tcp->localshm = (char*)shmat(tcp->shmid, NULL, 0);
+
+    if ((int)tcp->localshm == -1) {
+      perror("shmat");
+      exit(1);
+    }
+
+    if (shmctl(tcp->shmid, IPC_RMID, NULL) == -1) {
+      perror("shmctl(IPC_RMID)");
+      exit(1);
+    }
+
+    assert(tcp->localshm);
+  }
+}
+
+void free_tcb_CDE_fields(struct tcb* tcp) {
+  if (tcp->localshm) {
+    shmdt(tcp->localshm);
+  }
+  tcp->localshm = NULL;
+  tcp->childshm = NULL;
+}
+
+
+// inject a system call in the child process to tell it to attach our
+// shared memory segment, so that it can read modified paths from there
+//
+// Setup a shared memory region within child process,
+// then repeat current system call
+static void setup_shmat(struct tcb* tcp) {
+  assert(tcp->localshm);
+  assert(!tcp->childshm); // avoid duplicate calls
+
+  // stash away original registers so that we can restore them later
+  struct user_regs_struct cur_regs;
+  EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, &cur_regs) < 0);
+  memcpy(&tcp->saved_regs, &cur_regs, sizeof(cur_regs));
+
+
+  // The return value of shmat (attached address) is actually stored in
+  // the child's address space
+  tcp->savedaddr = find_free_addr(tcp->pid, PROT_READ|PROT_WRITE, sizeof(int));
+  tcp->savedword = ptrace(PTRACE_PEEKDATA, tcp->pid, tcp->savedaddr, 0);
+  EXITIF(errno); // PTRACE_PEEKDATA reports error in errno
+
+  /* The shmat call is implemented as a godawful sys_ipc. */
+  cur_regs.orig_eax = __NR_ipc;
+  /* The parameters are passed in ebx, ecx, edx, esi, edi, and ebp */
+  cur_regs.ebx = SHMAT;
+  /* The kernel names the rest of these, first, second, third, ptr,
+   * and fifth. Only first, second and ptr are used as inputs.  Third
+   * is a pointer to the output (unsigned long).
+   */
+  cur_regs.ecx = tcp->shmid;
+  cur_regs.edx = 0; /* shmat flags */
+  cur_regs.esi = (long)tcp->savedaddr; /* Pointer to the return value in the
+                                          child's address space. */
+  cur_regs.edi = (long)NULL; /* We don't use shmat's shmaddr */
+  cur_regs.ebp = 0; /* The "fifth" argument is unused. */
+
+  return; // STINT
+  EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, &cur_regs) < 0);
 }
 
