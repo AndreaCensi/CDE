@@ -24,6 +24,7 @@
 #include <linux/ipc.h>
 #include <linux/shm.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 
 #include "defs.h"
 

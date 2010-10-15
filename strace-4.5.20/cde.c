@@ -1,20 +1,38 @@
 #include "cde.h"
 
+// used as a temporary holding space for paths copied from child process
+static char path[MAXPATHLEN + 1]; 
 
 void CDE_begin_file_open(struct tcb* tcp) {
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
 
+  assert(!tcp->opened_filename);
+  tcp->opened_filename = strdup(path);
+
+  printf("BEGIN open %s\n", tcp->opened_filename);
 }
 
 void CDE_end_file_open(struct tcb* tcp) {
+  printf("END   open %s\n", tcp->opened_filename);
 
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
 }
 
 void CDE_begin_execve(struct tcb* tcp) {
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
 
+  assert(!tcp->opened_filename);
+  tcp->opened_filename = strdup(path);
+
+  printf("BEGIN execve %s\n", tcp->opened_filename);
 }
 
 void CDE_end_execve(struct tcb* tcp) {
+  printf("END   execve %s\n", tcp->opened_filename);
 
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
 }
 
 

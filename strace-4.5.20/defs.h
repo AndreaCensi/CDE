@@ -351,6 +351,9 @@ struct tcb {
 	int pfd_reg;
 	int pfd_status;
 #endif
+
+  // new fields added by pgbovine
+  char* opened_filename; // non-null during a call when a file has been opened
 };
 
 /* TCB flags */
