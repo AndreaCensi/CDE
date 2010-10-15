@@ -84,72 +84,84 @@ static void add_file_dependency(struct tcb* tcp) {
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
 
-void CDE_begin_file_open(struct tcb* tcp) {
+static void CDE_begin_file_syscall(struct tcb* tcp) {
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
+
   if (CDE_exec_mode) {
     if (!tcp->childshm) {
       begin_setup_shmat(tcp);
+      // no more need for filename
+      free(tcp->opened_filename);
+      tcp->opened_filename = NULL;
+
+      return; // MUST punt early here!!!
+    }
+
+    // redirect all requests for relative path to version within cde-root/
+    if (tcp->opened_filename[0] == '/') {
+      // modify filename so that it appears as a RELATIVE PATH
+      // within a cde-root/ sub-directory
+      char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+      strcpy(rel_path, "cde-root");
+      strcat(rel_path, tcp->opened_filename);
+      printf("open %s\n", rel_path);
+      free(rel_path);
     }
   }
   else {
-    // only track files opened in read-only or read-write mode:
-    char open_mode = (tcp->u_arg[1] & 0x3);
-    if (open_mode == O_RDONLY || open_mode == O_RDWR) {
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-      assert(!tcp->opened_filename);
-      tcp->opened_filename = strdup(path);
-    }
+  }
+}
+
+void CDE_begin_file_open(struct tcb* tcp) {
+  // only track files opened in read-only or read-write mode:
+  char open_mode = (tcp->u_arg[1] & 0x3);
+  if (open_mode == O_RDONLY || open_mode == O_RDWR) {
+    CDE_begin_file_syscall(tcp);
   }
 }
 
 void CDE_end_file_open(struct tcb* tcp) {
+  if (!tcp->opened_filename) {
+    return;
+  }
+ 
   if (CDE_exec_mode) {
 
   }
   else {
-    if (!tcp->opened_filename) {
-      return;
-    }
-       
-    // a non-negative return value means that the call returned
+    // non-negative return value means that the call returned
     // successfully with a known file descriptor
     if (tcp->u_rval >= 0) {
       add_file_dependency(tcp);
     }
-
-    free(tcp->opened_filename);
-    tcp->opened_filename = NULL;
   }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
 }
 
-void CDE_begin_execve(struct tcb* tcp) {
-  if (CDE_exec_mode) {
-    if (!tcp->childshm) {
-      begin_setup_shmat(tcp);
-    }
 
-  }
-  else {
-    EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-    assert(!tcp->opened_filename);
-    tcp->opened_filename = strdup(path);
-  }
+void CDE_begin_execve(struct tcb* tcp) {
+  CDE_begin_file_syscall(tcp);
 }
 
 void CDE_end_execve(struct tcb* tcp) {
+  assert(tcp->opened_filename);
+
   if (CDE_exec_mode) {
 
   }
   else {
-    assert(tcp->opened_filename);
-   
-    // a return value of 0 means success
+    // return value of 0 means a successful call
     if (tcp->u_rval == 0) {
       add_file_dependency(tcp);
     }
-
-    free(tcp->opened_filename);
-    tcp->opened_filename = NULL;
   }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
 }
 
 
