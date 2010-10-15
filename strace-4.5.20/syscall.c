@@ -2393,6 +2393,7 @@ trace_syscall_exiting(struct tcb *tcp)
 		return 0;
 	}
 
+#ifdef PGBOVINE_COMMENT // pgbovine
 	if (tcp->flags & TCB_REPRINT) {
 		printleader(tcp);
 		tprintf("<... ");
@@ -2404,6 +2405,7 @@ trace_syscall_exiting(struct tcb *tcp)
 			tprintf("%s", sysent[tcp->scno].sys_name);
 		tprintf(" resumed> ");
 	}
+#endif // PGBOVINE_COMMENT // pgbovine
 
 	if (cflag) {
 		struct timeval t = tv;
@@ -2424,6 +2426,19 @@ trace_syscall_exiting(struct tcb *tcp)
 		return res;
 	}
 
+  // pgbovine - call the function pointer for all in-range values:
+  if (tcp->scno >= nsyscalls || tcp->scno < 0 ||
+      ((qual_flags[tcp->scno] & QUAL_RAW) && tcp->scno != SYS_exit)) {
+    // empty
+  }
+  else {
+    // pgbovine - this function pointer refers to functions like
+    // sys_open() or sys_execve(), which we modify for CDE
+    // to track dependencies rather than simply printing
+    sys_res = (*sysent[tcp->scno].sys_func)(tcp);
+  }
+
+#ifdef PGBOVINE_COMMENT // pgbovine
 	if (tcp->scno >= nsyscalls || tcp->scno < 0
 	    || (qual_flags[tcp->scno] & QUAL_RAW))
 		sys_res = printargs(tcp);
@@ -2524,6 +2539,10 @@ trace_syscall_exiting(struct tcb *tcp)
 	dumpio(tcp);
 	if (fflush(tcp->outf) == EOF)
 		return -1;
+#endif // PGBOVINE_COMMENT // pgbovine
+
+	tcp_last = NULL; // pgbovine - simulates printtrailer() without printing a newline
+
 	tcp->flags &= ~TCB_INSYSCALL;
 	return 0;
 }
@@ -2547,15 +2566,16 @@ trace_syscall_entering(struct tcb *tcp)
 		return res;
 
 	if (res != 1) {
-		printleader(tcp);
+    // pgbovine - comment out a bunch of printing code
+		//printleader(tcp);
 		tcp->flags &= ~TCB_REPRINT;
 		tcp_last = tcp;
-		if (scno_good != 1)
-			tprintf("????" /* anti-trigraph gap */ "(");
-		else if (tcp->scno >= nsyscalls || tcp->scno < 0)
-			tprintf("syscall_%lu(", tcp->scno);
-		else
-			tprintf("%s(", sysent[tcp->scno].sys_name);
+		//if (scno_good != 1)
+		//	tprintf("????" /* anti-trigraph gap */ "(");
+		//else if (tcp->scno >= nsyscalls || tcp->scno < 0)
+		//	tprintf("syscall_%lu(", tcp->scno);
+		//else
+		//	tprintf("%s(", sysent[tcp->scno].sys_name);
 		/*
 		 * " <unavailable>" will be added later by the code which
 		 * detects ptrace errors.
@@ -2664,20 +2684,27 @@ trace_syscall_entering(struct tcb *tcp)
 		return 0;
 	}
 
-	printleader(tcp);
+  // pgbovine - comment out a bunch of printing code
+	//printleader(tcp);
 	tcp->flags &= ~TCB_REPRINT;
 	tcp_last = tcp;
-	if (tcp->scno >= nsyscalls || tcp->scno < 0)
-		tprintf("syscall_%lu(", tcp->scno);
-	else
-		tprintf("%s(", sysent[tcp->scno].sys_name);
+	//if (tcp->scno >= nsyscalls || tcp->scno < 0)
+	//	tprintf("syscall_%lu(", tcp->scno);
+	//else
+	//	tprintf("%s(", sysent[tcp->scno].sys_name);
+
 	if (tcp->scno >= nsyscalls || tcp->scno < 0 ||
 	    ((qual_flags[tcp->scno] & QUAL_RAW) && tcp->scno != SYS_exit))
 		sys_res = printargs(tcp);
 	else
+    // pgbovine - this function pointer refers to functions like
+    // sys_open() or sys_execve(), which we modify for CDE
+    // to track dependencies rather than simply printing
 		sys_res = (*sysent[tcp->scno].sys_func)(tcp);
-	if (fflush(tcp->outf) == EOF)
-		return -1;
+
+	//if (fflush(tcp->outf) == EOF)
+	//	return -1;
+
 	tcp->flags |= TCB_INSYSCALL;
 	/* Measure the entrance time as late as possible to avoid errors. */
 	if (dtime || cflag)

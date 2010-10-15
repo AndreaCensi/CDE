@@ -1,3 +1,8 @@
+/* Modified by Philip Guo for the CDE project
+   (grep for 'pgbovine' to see my changes)
+
+ */
+
 /*
  * Copyright (c) 1991, 1992 Paul Kranenburg <pk@cs.few.eur.nl>
  * Copyright (c) 1993 Branko Lankester <branko@hacktic.nl>
@@ -168,6 +173,9 @@ FILE *ofp;
 int exitval;
 {
 	fprintf(ofp, "\
+Modified by Philip Guo (pg@cs.stanford.edu) for the CDE project\n\
+(some options might not work as expected)\n\
+\n\
 usage: strace [-dffhiqrtttTvVxx] [-a column] [-e expr] ... [-o file]\n\
               [-p pid] ... [-s strsize] [-u username] [-E var=val] ...\n\
               [command [arg ...]]\n\
@@ -715,7 +723,13 @@ main(int argc, char *argv[])
 	interactive = 1;
 	set_sortby(DEFAULT_SORTBY);
 	set_personality(DEFAULT_PERSONALITY);
-	qualify("trace=all");
+
+  // pgbovine - only track selected system calls
+  // qualify actually mutates this string, so we can't pass in a constant
+  char* tmp = strdup("trace=open,execve");
+	qualify(tmp);
+  free(tmp);
+
 	qualify("abbrev=all");
 	qualify("verbose=all");
 	qualify("signal=all");

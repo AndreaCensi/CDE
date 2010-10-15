@@ -249,6 +249,10 @@ static const struct xlat prctl_options[] = {
 	{ 0,			NULL			},
 };
 
+// pgbovine 
+extern void CDE_begin_execve(struct tcb* tcp);
+extern void CDE_end_execve(struct tcb* tcp);
+
 
 static const char *
 unalignctl_string (unsigned int ctl)
@@ -1687,6 +1691,16 @@ sys_execv(struct tcb *tcp)
 int
 sys_execve(struct tcb *tcp)
 {
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_execve(tcp);
+  }
+  else {
+    CDE_end_execve(tcp);
+  }
+  return 0;
+
+#ifdef PGBOVINE_COMMENT // pgbovine
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		if (!verbose(tcp))
@@ -1707,6 +1721,7 @@ sys_execve(struct tcb *tcp)
 		}
 	}
 	return 0;
+#endif // PGBOVINE_COMMENT // pgbovine
 }
 
 #if UNIXWARE > 2

@@ -327,6 +327,11 @@ const struct xlat open_mode_flags[] = {
 # define AT_FDCWD                -100
 #endif
 
+// pgbovine
+extern void CDE_begin_file_open(struct tcb* tcp);
+extern void CDE_end_file_open(struct tcb* tcp);
+
+
 /* The fd is an "int", so when decoding x86 on x86_64, we need to force sign
  * extension to get the right value.  We do this by declaring fd as int here.
  */
@@ -417,7 +422,16 @@ decode_open(struct tcb *tcp, int offset)
 int
 sys_open(struct tcb *tcp)
 {
-	return decode_open(tcp, 0);
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_file_open(tcp);
+  }
+  else {
+    CDE_end_file_open(tcp);
+  }
+  return 0;
+
+	//return decode_open(tcp, 0);
 }
 
 #ifdef LINUX
