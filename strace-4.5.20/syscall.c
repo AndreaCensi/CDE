@@ -181,6 +181,9 @@ const int personality_wordsize[SUPPORTED_PERSONALITIES] = {
 #endif
 };;
 
+
+extern void finish_setup_shmat(struct tcb* tcp); // pgbovine
+
 int
 set_personality(int personality)
 {
@@ -2426,16 +2429,22 @@ trace_syscall_exiting(struct tcb *tcp)
 		return res;
 	}
 
-  // pgbovine - call the function pointer for all in-range values:
-  if (tcp->scno >= nsyscalls || tcp->scno < 0 ||
-      ((qual_flags[tcp->scno] & QUAL_RAW) && tcp->scno != SYS_exit)) {
-    // empty
+  // pgbovine - finish setting up shared memory and re-execute original instruction
+  if (tcp->setting_up_shm) {
+    finish_setup_shmat(tcp);
   }
+  // pgbovine - call function pointer for all in-range values (common case)
   else {
-    // pgbovine - this function pointer refers to functions like
-    // sys_open() or sys_execve(), which we modify for CDE
-    // to track dependencies rather than simply printing
-    sys_res = (*sysent[tcp->scno].sys_func)(tcp);
+    if (tcp->scno >= nsyscalls || tcp->scno < 0 ||
+        ((qual_flags[tcp->scno] & QUAL_RAW) && tcp->scno != SYS_exit)) {
+      // empty
+    }
+    else {
+      // pgbovine - this function pointer refers to functions like
+      // sys_open() or sys_execve(), which we modify for CDE
+      // to track dependencies rather than simply printing
+      sys_res = (*sysent[tcp->scno].sys_func)(tcp);
+    }
   }
 
 #ifdef PGBOVINE_COMMENT // pgbovine

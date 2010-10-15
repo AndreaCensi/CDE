@@ -365,6 +365,7 @@ struct tcb {
   struct user_regs_struct saved_regs;
   long savedword;
   void *savedaddr;
+  char setting_up_shm; // 1 if we're in the process of setting up shared memory
 };
 
 /* TCB flags */

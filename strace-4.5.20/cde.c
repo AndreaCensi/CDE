@@ -4,7 +4,7 @@
 // 0 for tracing regular execution
 char CDE_exec_mode;
 
-static void setup_shmat(struct tcb* tcp);
+static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void lazy_copy_file(char* src_filename, char* dst_filename);
 
@@ -87,7 +87,7 @@ static char path[MAXPATHLEN + 1];
 void CDE_begin_file_open(struct tcb* tcp) {
   if (CDE_exec_mode) {
     if (!tcp->childshm) {
-      setup_shmat(tcp);
+      begin_setup_shmat(tcp);
     }
   }
   else {
@@ -123,6 +123,9 @@ void CDE_end_file_open(struct tcb* tcp) {
 
 void CDE_begin_execve(struct tcb* tcp) {
   if (CDE_exec_mode) {
+    if (!tcp->childshm) {
+      begin_setup_shmat(tcp);
+    }
 
   }
   else {
@@ -446,6 +449,7 @@ static void lazy_copy_file(char* src_filename, char* dst_filename) {
 void alloc_tcb_CDE_fields(struct tcb* tcp) {
   tcp->localshm = NULL;
   tcp->childshm = NULL;
+  tcp->setting_up_shm = 0;
 
   if (CDE_exec_mode) {
     key_t key;
@@ -476,8 +480,10 @@ void free_tcb_CDE_fields(struct tcb* tcp) {
   if (tcp->localshm) {
     shmdt(tcp->localshm);
   }
+  // need to null out elts in case table entries are recycled
   tcp->localshm = NULL;
   tcp->childshm = NULL;
+  tcp->setting_up_shm = 0;
 }
 
 
@@ -486,15 +492,14 @@ void free_tcb_CDE_fields(struct tcb* tcp) {
 //
 // Setup a shared memory region within child process,
 // then repeat current system call
-static void setup_shmat(struct tcb* tcp) {
+static void begin_setup_shmat(struct tcb* tcp) {
   assert(tcp->localshm);
   assert(!tcp->childshm); // avoid duplicate calls
 
   // stash away original registers so that we can restore them later
   struct user_regs_struct cur_regs;
-  EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, &cur_regs) < 0);
+  EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
   memcpy(&tcp->saved_regs, &cur_regs, sizeof(cur_regs));
-
 
   // The return value of shmat (attached address) is actually stored in
   // the child's address space
@@ -517,7 +522,29 @@ static void setup_shmat(struct tcb* tcp) {
   cur_regs.edi = (long)NULL; /* We don't use shmat's shmaddr */
   cur_regs.ebp = 0; /* The "fifth" argument is unused. */
 
-  return; // STINT
-  EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, &cur_regs) < 0);
+  EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+  tcp->setting_up_shm = 1; // very importante!!!
+}
+
+void finish_setup_shmat(struct tcb* tcp) {
+  //assert(tcp->u_arg[0] == 0); // setup had better been a success!
+
+  errno = 0;
+  tcp->childshm = (void*)ptrace(PTRACE_PEEKDATA, tcp->pid, tcp->savedaddr, 0);
+  EXITIF(errno); // PTRACE_PEEKDATA reports error in errno
+
+  // restore original data in child's address space
+  EXITIF(ptrace(PTRACE_POKEDATA, tcp->pid, tcp->savedaddr, tcp->savedword));
+
+  tcp->saved_regs.eax = tcp->saved_regs.orig_eax;
+
+  // back up IP so that we can re-execute previous instruction
+  tcp->saved_regs.eip = tcp->saved_regs.eip - 2;
+  EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&tcp->saved_regs) < 0);
+
+  assert(tcp->childshm);
+
+  tcp->setting_up_shm = 0; // very importante!!!
 }
 
