@@ -1,19 +1,81 @@
 #include "cde.h"
 
+#ifdef BLAH
+            if ((child_pcb->regs.eax >= 0) &&
+                (open_mode == O_RDONLY || open_mode == O_RDWR)) {
+              struct stat st;
+              EXITIF(stat(filename, &st));
+              // check whether it's a REGULAR-ASS file
+              if (S_ISREG(st.st_mode)) {
+                // assume that relative paths are in working directory,
+                // so no need to grab those files
+                //
+                // TODO: this isn't a perfect assumption since a
+                // relative path could be something like '../data.txt',
+                // which this won't pick up :)
+                //   WOW, this libc function seems useful for
+                //   canonicalizing filenames:
+                //     char* canonicalize_file_name (const char *name)
+                if (filename[0] == '/') {
+                  // modify filename so that it appears as a RELATIVE PATH
+                  // within a cde-root/ sub-directory
+                  char* rel_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+                  strcpy(rel_path, "cde-root");
+                  strcat(rel_path, filename);
+
+                  struct path* p = str2path(rel_path);
+                  path_pop(p); // ignore filename portion to leave just the dirname
+
+                  // now mkdir all directories specified in rel_path
+                  int i;
+                  for (i = 1; i <= p->depth; i++) {
+                    char* dn = path2str(p, i);
+                    mkdir(dn, 0777);
+                    free(dn);
+                  }
+
+                  // finally, 'copy' filename over to rel_path
+                  // 1.) try a hard link for efficiency
+                  // 2.) if that fails, then do a straight-up copy 
+                  //     TODO: can optimize by first checking md5sum or
+                  //     something before copying
+
+                  // EEXIST means the file already exists, which isn't
+                  // really a hard link failure ...
+                  if (link(filename, rel_path) && (errno != EEXIST)) {
+                    copy_file(filename, rel_path);
+                  }
+
+                  delete_path(p);
+                  free(rel_path);
+                }
+              }
+#endif
+
+
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
 
 void CDE_begin_file_open(struct tcb* tcp) {
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-
-  assert(!tcp->opened_filename);
-  tcp->opened_filename = strdup(path);
-
-  printf("BEGIN open %s\n", tcp->opened_filename);
+  // only track files opened in read-only or read-write mode:
+  char open_mode = (tcp->u_arg[1] & 0x3);
+  if (open_mode == O_RDONLY || open_mode == O_RDWR) {
+    EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+    assert(!tcp->opened_filename);
+    tcp->opened_filename = strdup(path);
+  }
 }
 
 void CDE_end_file_open(struct tcb* tcp) {
-  printf("END   open %s\n", tcp->opened_filename);
+  if (!tcp->opened_filename) {
+    return;
+  }
+     
+  // a non-negative return value means that the call returned
+  // successfully with a known file descriptor
+  if (tcp->u_rval >= 0) {
+    printf("END   open %s\n", tcp->opened_filename);
+  }
 
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
@@ -21,70 +83,20 @@ void CDE_end_file_open(struct tcb* tcp) {
 
 void CDE_begin_execve(struct tcb* tcp) {
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-
   assert(!tcp->opened_filename);
   tcp->opened_filename = strdup(path);
-
-  printf("BEGIN execve %s\n", tcp->opened_filename);
 }
 
 void CDE_end_execve(struct tcb* tcp) {
-  printf("END   execve %s\n", tcp->opened_filename);
+  assert(tcp->opened_filename);
+ 
+  // a return value of 0 means success
+  if (tcp->u_rval == 0) {
+    printf("END   execve %s\n", tcp->opened_filename);
+  }
 
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
-}
-
-
-// copy up to n bytes from src (in child process) to dest (in this process)
-// using PTRACE_PEEKDATA
-//
-// TODO: if this is too slow, we could implement Goanna's optimization
-// of directly reading from the /proc/<pid>/mem pseudo-file, which can
-// transfer one 4K page at a time rather than one word at a time
-void memcpy_from_child(struct pcb *pcb, void* dest, void* src, size_t n) {
-  // adapted from Goanna
-
-  long w;
-  long *ldest = (long *)dest;
-  char *cdest;
-
-  assert(pcb);
-
-  while (n >= sizeof(int)) {
-    errno = 0;
-    w = ptrace(PTRACE_PEEKDATA, pcb->pid, src, NULL);
-    if (errno) {
-      // silently exit as soon as you get an error
-      // (e.g., page fault in child process)
-      return;
-    }
-
-    *ldest++ = w;
-    n -= sizeof(int);
-    src = (char *)src + sizeof(int);
-    dest = (char *)dest + sizeof(int);
-  }
-
-  /* Cleanup the last little bit. */
-  if (n) {
-    cdest = (char *)ldest;
-
-    errno = 0;
-    w = ptrace(PTRACE_PEEKDATA, pcb->pid, src, NULL);
-    if (errno) {
-      // silently exit as soon as you get an error
-      // (e.g., page fault in child process)
-      return;
-    }
-
-    /* Little endian sucks. */
-    *cdest++ = (w & 0x000000ff);
-    if (n >= 2)
-      *cdest++ = (w & 0x0000ff00) >> 8;
-    if (n >= 3)
-      *cdest++ = (w & 0x00ff0000) >> 16;
-  }
 }
 
 

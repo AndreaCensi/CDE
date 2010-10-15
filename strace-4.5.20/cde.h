@@ -127,7 +127,6 @@ struct pcb {
 #define INGETPID 19	/* We are in a getpid call that is getting monitored twice. */
 
 
-void memcpy_from_child(struct pcb *pcb, void* dest, void* src, size_t n);
 void* find_free_addr(int pid, int exec, unsigned long size);
 struct pcb* new_pcb(int pid, int state);
 void delete_pcb(struct pcb *pcb);
