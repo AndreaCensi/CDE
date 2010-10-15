@@ -1,57 +1,55 @@
 #include "cde.h"
 
-#ifdef BLAH
-            if ((child_pcb->regs.eax >= 0) &&
-                (open_mode == O_RDONLY || open_mode == O_RDWR)) {
-              struct stat st;
-              EXITIF(stat(filename, &st));
-              // check whether it's a REGULAR-ASS file
-              if (S_ISREG(st.st_mode)) {
-                // assume that relative paths are in working directory,
-                // so no need to grab those files
-                //
-                // TODO: this isn't a perfect assumption since a
-                // relative path could be something like '../data.txt',
-                // which this won't pick up :)
-                //   WOW, this libc function seems useful for
-                //   canonicalizing filenames:
-                //     char* canonicalize_file_name (const char *name)
-                if (filename[0] == '/') {
-                  // modify filename so that it appears as a RELATIVE PATH
-                  // within a cde-root/ sub-directory
-                  char* rel_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-                  strcpy(rel_path, "cde-root");
-                  strcat(rel_path, filename);
+static void add_file_dependency(struct tcb* tcp) {
+  char* filename = tcp->opened_filename;
+  assert(filename);
 
-                  struct path* p = str2path(rel_path);
-                  path_pop(p); // ignore filename portion to leave just the dirname
+  struct stat st;
+  EXITIF(stat(filename, &st));
+  // check whether it's a REGULAR-ASS file
+  if (S_ISREG(st.st_mode)) {
+    // assume that relative paths are in working directory,
+    // so no need to grab those files
+    //
+    // TODO: this isn't a perfect assumption since a
+    // relative path could be something like '../data.txt',
+    // which this won't pick up :)
+    //   WOW, this libc function seems useful for
+    //   canonicalizing filenames:
+    //     char* canonicalize_file_name (const char *name)
+    if (filename[0] == '/') {
+      // modify filename so that it appears as a RELATIVE PATH
+      // within a cde-root/ sub-directory
+      char* rel_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+      strcpy(rel_path, "cde-root");
+      strcat(rel_path, filename);
 
-                  // now mkdir all directories specified in rel_path
-                  int i;
-                  for (i = 1; i <= p->depth; i++) {
-                    char* dn = path2str(p, i);
-                    mkdir(dn, 0777);
-                    free(dn);
-                  }
+      struct path* p = str2path(rel_path);
+      path_pop(p); // ignore filename portion to leave just the dirname
 
-                  // finally, 'copy' filename over to rel_path
-                  // 1.) try a hard link for efficiency
-                  // 2.) if that fails, then do a straight-up copy 
-                  //     TODO: can optimize by first checking md5sum or
-                  //     something before copying
+      // now mkdir all directories specified in rel_path
+      int i;
+      for (i = 1; i <= p->depth; i++) {
+        char* dn = path2str(p, i);
+        mkdir(dn, 0777);
+        free(dn);
+      }
 
-                  // EEXIST means the file already exists, which isn't
-                  // really a hard link failure ...
-                  if (link(filename, rel_path) && (errno != EEXIST)) {
-                    copy_file(filename, rel_path);
-                  }
+      // finally, 'copy' filename over to rel_path
+      // 1.) try a hard link for efficiency
+      // 2.) if that fails, then do a straight-up copy 
 
-                  delete_path(p);
-                  free(rel_path);
-                }
-              }
-#endif
+      // EEXIST means the file already exists, which isn't
+      // really a hard link failure ...
+      if (link(filename, rel_path) && (errno != EEXIST)) {
+        lazy_copy_file(filename, rel_path);
+      }
 
+      delete_path(p);
+      free(rel_path);
+    }
+  }
+}
 
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
@@ -74,7 +72,7 @@ void CDE_end_file_open(struct tcb* tcp) {
   // a non-negative return value means that the call returned
   // successfully with a known file descriptor
   if (tcp->u_rval >= 0) {
-    printf("END   open %s\n", tcp->opened_filename);
+    add_file_dependency(tcp);
   }
 
   free(tcp->opened_filename);
@@ -92,7 +90,7 @@ void CDE_end_execve(struct tcb* tcp) {
  
   // a return value of 0 means success
   if (tcp->u_rval == 0) {
-    printf("END   execve %s\n", tcp->opened_filename);
+    add_file_dependency(tcp);
   }
 
   free(tcp->opened_filename);
@@ -398,15 +396,29 @@ struct path* str2path(char* path) {
 }
 
 
-// primitive file copy
-// TODO: could optimize by never clobbering dst_filename if its
-// modification date is equal to or newer than that of src_filename
-void copy_file(char* src_filename, char* dst_filename) {
+// if modtime($dst_filename) < modtime($src_filename):
+//   cp $src_filename $dst_filename
+void lazy_copy_file(char* src_filename, char* dst_filename) {
   int inF;
   int outF;
   int bytes;
   char buf[4096]; // TODO: consider using BUFSIZ if it works better
 
+
+  // lazy optimization ... only do a copy if dst is older than src
+  struct stat inF_stat;
+  struct stat outF_stat;
+  EXITIF(stat(src_filename, &inF_stat) < 0); // this had better exist
+
+  // if dst file exists and is not older than src file, then punt
+  if (stat(dst_filename, &outF_stat) == 0) {
+    if (outF_stat.st_mtime >= inF_stat.st_mtime) {
+      //printf("PUNTED on %s\n", dst_filename);
+      return;
+    }
+  }
+
+  // do a full-on copy
   EXITIF((inF = open(src_filename, O_RDONLY)) < 0);
   // create with permissive perms
   EXITIF((outF = open(dst_filename, O_WRONLY | O_CREAT, 0777)) < 0);
