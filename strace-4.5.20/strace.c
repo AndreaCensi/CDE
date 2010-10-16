@@ -529,6 +529,10 @@ startup_child (char **argv)
 	int pid = 0;
 	struct tcb *tcp;
 
+  // pgbovine
+  char executable_path[MAXPATHLEN];
+  executable_path[0] = '\0';
+
 	filename = argv[0];
 	if (strchr(filename, '/')) {
 		if (strlen(filename) > sizeof pathname - 1) {
@@ -628,7 +632,19 @@ startup_child (char **argv)
 			if (len && pathname[len - 1] != '/')
 				pathname[len++] = '/';
 			strcpy(pathname + len, filename);
-			if (stat(pathname, &statbuf) == 0 &&
+
+      // pgbovine
+      if (CDE_exec_mode) {
+        // use "cde-root/" prefix to find the version of executable
+        // that's in the CDE package
+        strcpy(executable_path, "cde-root");
+        strcat(executable_path, pathname);
+      }
+      else {
+        strcpy(executable_path, pathname);
+      }
+
+			if (stat(executable_path, &statbuf) == 0 &&
 			    /* Accept only regular files
 			       with some execute bits set.
 			       XXX not perfect, might still fail */
@@ -639,7 +655,7 @@ startup_child (char **argv)
 
     free(path_base); // pgbovine
 	}
-	if (stat(pathname, &statbuf) < 0) {
+	if (stat(executable_path, &statbuf) < 0) {
 		fprintf(stderr, "%s: %s: command not found\n",
 			progname, filename);
 		exit(1);
@@ -741,7 +757,7 @@ startup_child (char **argv)
 		}
 #endif /* !USE_PROCFS */
 
-		execv(pathname, argv);
+		execv(executable_path, argv);
 		perror("strace: exec");
 		_exit(1);
 	}
