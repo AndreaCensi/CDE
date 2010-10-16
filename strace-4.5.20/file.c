@@ -330,6 +330,8 @@ const struct xlat open_mode_flags[] = {
 // pgbovine
 extern void CDE_begin_file_open(struct tcb* tcp);
 extern void CDE_end_file_open(struct tcb* tcp);
+extern void CDE_begin_file_stat(struct tcb* tcp);
+extern void CDE_end_file_stat(struct tcb* tcp);
 
 
 /* The fd is an "int", so when decoding x86 on x86_64, we need to force sign
@@ -1229,6 +1231,16 @@ printoldstat(struct tcb *tcp, long addr)
 int
 sys_stat(struct tcb *tcp)
 {
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_file_stat(tcp);
+  }
+  else {
+    CDE_end_file_stat(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
@@ -1236,12 +1248,23 @@ sys_stat(struct tcb *tcp)
 		printstat(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 #endif
 
 int
 sys_stat64(struct tcb *tcp)
 {
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_file_stat(tcp);
+  }
+  else {
+    CDE_end_file_stat(tcp);
+  }
+  return 0;
+
+  /*
 #ifdef HAVE_STAT64
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
@@ -1253,6 +1276,7 @@ sys_stat64(struct tcb *tcp)
 #else
 	return printargs(tcp);
 #endif
+  */
 }
 
 #ifdef LINUX

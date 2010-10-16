@@ -86,67 +86,70 @@ static void add_file_dependency(struct tcb* tcp) {
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
 
-static void CDE_begin_file_syscall(struct tcb* tcp) {
-  assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
+// redirect request for opened_filename to a version within cde-root/
+static void redirect_filename(struct tcb* tcp) {
+  assert(CDE_exec_mode);
+  assert(tcp->opened_filename);
 
-  if (CDE_exec_mode) {
-    if (!tcp->childshm) {
-      begin_setup_shmat(tcp);
-      // no more need for filename
-      free(tcp->opened_filename);
-      tcp->opened_filename = NULL;
+  if (!tcp->childshm) {
+    begin_setup_shmat(tcp);
+    // no more need for filename
+    free(tcp->opened_filename);
+    tcp->opened_filename = NULL;
 
-      return; // MUST punt early here!!!
-    }
-
-    // redirect all requests for relative path to version within cde-root/
-    // if they exist
-    if (tcp->opened_filename[0] == '/') {
-      assert(tcp->childshm);
-
-      // modify filename so that it appears as a RELATIVE PATH
-      // within a cde-root/ sub-directory
-      char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
-      strcpy(rel_path, "cde-root");
-      strcat(rel_path, tcp->opened_filename);
-
-      errno = 0;
-      char* abs_path = canonicalize_file_name(rel_path);
-      if (!abs_path) {
-        assert(errno);
-        free(rel_path);
-        return; // must punt early!
-      }
-      EXITIF(errno);
-
-      strcpy(tcp->localshm, abs_path); // hopefully this doesn't overflow :0
-
-      //printf("open %s\n", tcp->localshm);
-      //static char tmp[MAXPATHLEN + 1];
-      //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
-      //printf("     %s\n", tmp);
-
-      struct user_regs_struct cur_regs;
-      EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
-      cur_regs.ebx = (long)tcp->childshm;
-      ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
-
-      free(abs_path);
-      free(rel_path);
-    }
+    return; // MUST punt early here!!!
   }
-  else {
 
+  // redirect all requests for relative path to version within cde-root/
+  // if they exist
+  if (tcp->opened_filename[0] == '/') {
+    assert(tcp->childshm);
+
+    // modify filename so that it appears as a RELATIVE PATH
+    // within a cde-root/ sub-directory
+    char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+    strcpy(rel_path, "cde-root");
+    strcat(rel_path, tcp->opened_filename);
+
+    errno = 0;
+    char* abs_path = canonicalize_file_name(rel_path);
+    if (!abs_path) {
+      assert(errno);
+      free(rel_path);
+      return; // must punt early!
+    }
+    EXITIF(errno);
+
+    strcpy(tcp->localshm, abs_path); // hopefully this doesn't overflow :0
+
+    //printf("open %s\n", tcp->localshm);
+    //static char tmp[MAXPATHLEN + 1];
+    //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
+    //printf("     %s\n", tmp);
+
+    struct user_regs_struct cur_regs;
+    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+    cur_regs.ebx = (long)tcp->childshm;
+    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+
+    free(abs_path);
+    free(rel_path);
   }
 }
+
 
 void CDE_begin_file_open(struct tcb* tcp) {
   // only track files opened in read-only or read-write mode:
   char open_mode = (tcp->u_arg[1] & 0x3);
   if (open_mode == O_RDONLY || open_mode == O_RDWR) {
-    CDE_begin_file_syscall(tcp);
+
+    assert(!tcp->opened_filename);
+    EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+    tcp->opened_filename = strdup(path);
+
+    if (CDE_exec_mode) {
+      redirect_filename(tcp);
+    }
   }
 }
 
@@ -156,7 +159,7 @@ void CDE_end_file_open(struct tcb* tcp) {
   }
  
   if (CDE_exec_mode) {
-
+    // empty
   }
   else {
     // non-negative return value means that the call returned
@@ -172,7 +175,13 @@ void CDE_end_file_open(struct tcb* tcp) {
 
 
 void CDE_begin_execve(struct tcb* tcp) {
-  CDE_begin_file_syscall(tcp);
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
+
+  if (CDE_exec_mode) {
+    redirect_filename(tcp);
+  }
 }
 
 void CDE_end_execve(struct tcb* tcp) {
@@ -191,6 +200,25 @@ void CDE_end_execve(struct tcb* tcp) {
     }
   }
 
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+
+void CDE_begin_file_stat(struct tcb* tcp) {
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
+
+  // redirect stat call to the version of the file within cde-root/ package
+  if (CDE_exec_mode) {
+    redirect_filename(tcp);
+  }
+}
+
+void CDE_end_file_stat(struct tcb* tcp) {
+  //EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  //printf("END   stat %s\n", path);
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
 }

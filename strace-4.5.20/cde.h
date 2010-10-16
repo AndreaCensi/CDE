@@ -44,12 +44,4 @@ int shmctl(int shmid, int cmd, struct shmid_ds *buf);
 } while(0)
 
 
-// hooks into main strace
-void CDE_begin_file_open(struct tcb* tcp);
-void CDE_end_file_open(struct tcb* tcp);
-
-void CDE_begin_execve(struct tcb* tcp);
-void CDE_end_execve(struct tcb* tcp);
-
-
 #endif // _CDE_H
