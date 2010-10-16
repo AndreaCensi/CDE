@@ -792,6 +792,9 @@ main(int argc, char *argv[])
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
   }
+  else {
+    CDE_exec_mode = 0;
+  }
 
 
 	/* Allocate the initial tcbtab.  */
