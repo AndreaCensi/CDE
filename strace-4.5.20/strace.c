@@ -1,6 +1,8 @@
 /* Modified by Philip Guo for the CDE project
    (grep for 'pgbovine' to see my changes)
 
+   The resulting executables are called 'cde' and 'cde-exec'
+
  */
 
 /*
@@ -179,9 +181,6 @@ int exitval;
 {
 	fprintf(ofp, "\
 Modified by Philip Guo (pg@cs.stanford.edu) for the CDE project\n\
-\n\
-CDE options:\n\
-  -e Execute CDE package in sandbox\n\
 \n\
 (the options below might not work as expected)\n\
 \n\
@@ -787,7 +786,13 @@ main(int argc, char *argv[])
 
 	static char buf[BUFSIZ];
 
-	progname = argv[0] ? argv[0] : "strace";
+  // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
+	progname = argv[0] ? argv[0] : "cde";
+
+  if (strcmp(basename(progname), "cde-exec") == 0) {
+    CDE_exec_mode = 1;
+  }
+
 
 	/* Allocate the initial tcbtab.  */
 	tcbtabsize = argc;	/* Surely enough for all -p args.  */
@@ -890,10 +895,7 @@ main(int argc, char *argv[])
 			acolumn = atoi(optarg);
 			break;
 		case 'e':
-      // pgbovine - hijack '-e' option for a different purpose than
-      // strace intended
-      CDE_exec_mode = 1;
-			//qualify(optarg);
+			qualify(optarg);
 			break;
 		case 'o':
 			outfname = strdup(optarg);
