@@ -1368,6 +1368,16 @@ sys_oldfstat(struct tcb *tcp)
 int
 sys_lstat(struct tcb *tcp)
 {
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_file_stat(tcp);
+  }
+  else {
+    CDE_end_file_stat(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
@@ -1375,12 +1385,23 @@ sys_lstat(struct tcb *tcp)
 		printstat(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 #endif
 
 int
 sys_lstat64(struct tcb *tcp)
 {
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_file_stat(tcp);
+  }
+  else {
+    CDE_end_file_stat(tcp);
+  }
+  return 0;
+
+  /*
 #ifdef HAVE_STAT64
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
@@ -1392,6 +1413,7 @@ sys_lstat64(struct tcb *tcp)
 #else
 	return printargs(tcp);
 #endif
+  */
 }
 
 #if defined(LINUX) && defined(HAVE_STRUCT___OLD_KERNEL_STAT)

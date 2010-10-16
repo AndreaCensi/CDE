@@ -217,8 +217,19 @@ void CDE_begin_file_stat(struct tcb* tcp) {
 }
 
 void CDE_end_file_stat(struct tcb* tcp) {
-  //EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  //printf("END   stat %s\n", path);
+  assert(tcp->opened_filename);
+
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    // return value of 0 means a successful call
+    if (tcp->u_rval == 0) {
+      // TODO: perhaps save an 'empty' file or directory if the real
+      // file/dir exists?
+    }
+  }
+
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
 }

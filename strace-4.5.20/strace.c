@@ -551,11 +551,11 @@ startup_child (char **argv)
 		strcpy(pathname, filename);
 #endif /* USE_DEBUGGING_EXEC */
 	else {
-    // pgbovine - muck with $PATH variable depending on CDE_exec_mode
-		char *path_base = NULL;
-		char *path = NULL;
+		char *path;
 		int m, n, len;
 
+    // pgbovine - muck with $PATH variable depending on CDE_exec_mode
+    // TODO: can override other environment variables here too
     if (CDE_exec_mode) {
       // read $PATH from "cde-root/cde.environment" file
       FILE* envF = fopen("cde-root/cde.environment", "r");
@@ -580,22 +580,16 @@ startup_child (char **argv)
           }
 
           if (is_path) {
-            path = strdup(p); // malloc'ed
+            // clobber $PATH with saved value from our file
+            setenv("PATH", p, 1);
             break;
           }
         }
-
-        if (path) {
-          break;
-        }
-
       }
       free(line);
     }
     else {
       // save current value of $PATH to "cde-root/cde.environment" file
-      path = strdup(getenv("PATH")); // malloc'ed
-
       mkdir("cde-root", 0777);
       FILE* envF = fopen("cde-root/cde.environment", "w");
       if (!envF) {
@@ -604,13 +598,11 @@ startup_child (char **argv)
         exit(1);
       }
       fputs("PATH=", envF);
-      fputs(path, envF);
+      fputs(getenv("PATH"), envF);
       fclose(envF);
     }
 
-    path_base = path; // for calling free()
-
-		for (; path && *path; path += m) {
+		for (path = getenv("PATH"); path && *path; path += m) {
 			if (strchr(path, ':')) {
 				n = strchr(path, ':') - path;
 				m = n + 1;
@@ -651,8 +643,6 @@ startup_child (char **argv)
 			    (statbuf.st_mode & 0111))
 				break;
 		}
-
-    free(path_base); // pgbovine
 	}
 	if (stat(executable_path, &statbuf) < 0) {
 		fprintf(stderr, "%s: %s: command not found\n",
@@ -796,6 +786,9 @@ main(int argc, char *argv[])
     CDE_exec_mode = 0;
   }
 
+  // pgbovine - allow most slutty of permissions for new files/directories
+  umask(0000);
+
 
 	/* Allocate the initial tcbtab.  */
 	tcbtabsize = argc;	/* Surely enough for all -p args.  */
@@ -817,7 +810,7 @@ main(int argc, char *argv[])
 
   // pgbovine - only track selected system calls
   // qualify actually mutates this string, so we can't pass in a constant
-  char* tmp = strdup("trace=open,execve,stat64");
+  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64");
 	qualify(tmp);
   free(tmp);
 
@@ -825,11 +818,11 @@ main(int argc, char *argv[])
 	qualify("verbose=all");
 	qualify("signal=all");
 	while ((c = getopt(argc, argv,
-		"+cCedfFhiqrtTvVxz"
+		"+cCdfFhiqrtTvVxz"
 #ifndef USE_PROCFS
 		"D"
 #endif
-		"a:o:O:p:s:S:u:E:")) != EOF) {
+		"a:e:o:O:p:s:S:u:E:")) != EOF) {
 		switch (c) {
 		case 'c':
 			if (cflag == CFLAG_BOTH) {
