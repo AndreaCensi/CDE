@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
 
             if (strcmp(filename, "infile.txt") == 0) {
               strcpy(child_pcb->localshm, "infile2.txt");
-              printf("shm = '%s'\n", child_pcb->localshm);
+              printf("shm = %p %p\n", child_pcb->localshm, child_pcb->childshm);
 
               // redirect the system call to the new path
               // TODO: should we restore ebx back to its original value

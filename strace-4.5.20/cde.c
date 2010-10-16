@@ -8,6 +8,8 @@ static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void lazy_copy_file(char* src_filename, char* dst_filename);
 
+// to shut up gcc without going through header hell
+extern char* canonicalize_file_name(const char *name);
 
 /* A structure to represent paths. */
 struct namecomp {
@@ -100,17 +102,43 @@ static void CDE_begin_file_syscall(struct tcb* tcp) {
     }
 
     // redirect all requests for relative path to version within cde-root/
+    // if they exist
     if (tcp->opened_filename[0] == '/') {
+      assert(tcp->childshm);
+
       // modify filename so that it appears as a RELATIVE PATH
       // within a cde-root/ sub-directory
       char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
       strcpy(rel_path, "cde-root");
       strcat(rel_path, tcp->opened_filename);
-      printf("open %s\n", rel_path);
+
+      errno = 0;
+      char* abs_path = canonicalize_file_name(rel_path);
+      if (!abs_path) {
+        assert(errno);
+        free(rel_path);
+        return; // must punt early!
+      }
+      EXITIF(errno);
+
+      strcpy(tcp->localshm, abs_path); // hopefully this doesn't overflow :0
+
+      //printf("open %s\n", tcp->localshm);
+      //static char tmp[MAXPATHLEN + 1];
+      //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
+      //printf("     %s\n", tmp);
+
+      struct user_regs_struct cur_regs;
+      EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+      cur_regs.ebx = (long)tcp->childshm;
+      ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+
+      free(abs_path);
       free(rel_path);
     }
   }
   else {
+
   }
 }
 
@@ -151,7 +179,12 @@ void CDE_end_execve(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
   if (CDE_exec_mode) {
-
+    // WOW, what a gross hack!  for some reason, doing an execve changes
+    // the memory layout of the child process (probably because it
+    // overwrites the child with a new image), so the address that was
+    // formerly at childshm might no longer be valid ... clear it so
+    // that begin_setup_shmat() will be called again
+    tcp->childshm = NULL;
   }
   else {
     // return value of 0 means a successful call
@@ -469,7 +502,7 @@ void alloc_tcb_CDE_fields(struct tcb* tcp) {
     do {
       errno = 0;
       key = rand();
-      tcp->shmid = shmget(key, PATH_MAX * 2, IPC_CREAT|IPC_EXCL|0600);
+      tcp->shmid = shmget(key, MAXPATHLEN * 2, IPC_CREAT|IPC_EXCL|0600);
     } while (tcp->shmid == -1 && errno == EEXIST);
 
     tcp->localshm = (char*)shmat(tcp->shmid, NULL, 0);
@@ -540,7 +573,11 @@ static void begin_setup_shmat(struct tcb* tcp) {
 }
 
 void finish_setup_shmat(struct tcb* tcp) {
-  //assert(tcp->u_arg[0] == 0); // setup had better been a success!
+  struct user_regs_struct cur_regs;
+  EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+  // setup had better been a success!
+  assert(cur_regs.orig_eax == __NR_ipc);
+  assert(cur_regs.eax == 0);
 
   errno = 0;
   tcp->childshm = (void*)ptrace(PTRACE_PEEKDATA, tcp->pid, tcp->savedaddr, 0);
@@ -552,6 +589,7 @@ void finish_setup_shmat(struct tcb* tcp) {
   tcp->saved_regs.eax = tcp->saved_regs.orig_eax;
 
   // back up IP so that we can re-execute previous instruction
+  // TODO: is the use of 2 specific to 32-bit machines???
   tcp->saved_regs.eip = tcp->saved_regs.eip - 2;
   EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&tcp->saved_regs) < 0);
 

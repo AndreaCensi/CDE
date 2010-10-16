@@ -360,11 +360,11 @@ struct tcb {
   // Fields pertaining to the shared memory segment,
   // which is only valid when CDE_exec_mode option is 1
   int shmid;
-  char *localshm; // address in our address space
-  void *childshm; // address in child's address space
+  char* localshm; // address in our address space
+  void* childshm; // address in child's address space
   struct user_regs_struct saved_regs;
   long savedword;
-  void *savedaddr;
+  void* savedaddr;
   char setting_up_shm; // 1 if we're in the process of setting up shared memory
 };
 
