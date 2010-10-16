@@ -548,10 +548,66 @@ startup_child (char **argv)
 		strcpy(pathname, filename);
 #endif /* USE_DEBUGGING_EXEC */
 	else {
-		char *path;
+    // pgbovine - muck with $PATH variable depending on CDE_exec_mode
+		char *path_base = NULL;
+		char *path = NULL;
 		int m, n, len;
 
-		for (path = getenv("PATH"); path && *path; path += m) {
+    if (CDE_exec_mode) {
+      // read $PATH from "cde-root/cde.environment" file
+      FILE* envF = fopen("cde-root/cde.environment", "r");
+      if (!envF) {
+        perror("cde-root/cde.environment");
+        cleanup();
+        exit(1);
+      }
+
+      char* line = NULL;
+      size_t len = 0;
+      ssize_t read;
+      while ((read = getline(&line, &len, envF)) != -1) {
+        char* p;
+
+        char is_path = 0;
+        for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
+          // find PATH environment variable
+          if (strcmp(p, "PATH") == 0) {
+            is_path = 1;
+            continue;
+          }
+
+          if (is_path) {
+            path = strdup(p); // malloc'ed
+            break;
+          }
+        }
+
+        if (path) {
+          break;
+        }
+
+      }
+      free(line);
+    }
+    else {
+      // save current value of $PATH to "cde-root/cde.environment" file
+      path = strdup(getenv("PATH")); // malloc'ed
+
+      mkdir("cde-root", 0777);
+      FILE* envF = fopen("cde-root/cde.environment", "w");
+      if (!envF) {
+        perror("cde-root/cde.environment");
+        cleanup();
+        exit(1);
+      }
+      fputs("PATH=", envF);
+      fputs(path, envF);
+      fclose(envF);
+    }
+
+    path_base = path; // for calling free()
+
+		for (; path && *path; path += m) {
 			if (strchr(path, ':')) {
 				n = strchr(path, ':') - path;
 				m = n + 1;
@@ -580,6 +636,8 @@ startup_child (char **argv)
 			    (statbuf.st_mode & 0111))
 				break;
 		}
+
+    free(path_base); // pgbovine
 	}
 	if (stat(pathname, &statbuf) < 0) {
 		fprintf(stderr, "%s: %s: command not found\n",
