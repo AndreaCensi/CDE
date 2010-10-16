@@ -179,10 +179,8 @@ void CDE_end_execve(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
   if (CDE_exec_mode) {
-    // WOW, what a gross hack!  for some reason, doing an execve changes
-    // the memory layout of the child process (probably because it
-    // overwrites the child with a new image), so the address that was
-    // formerly at childshm might no longer be valid ... clear it so
+    // WOW, what a gross hack!  execve detaches all shared memory
+    // segments, so childshm is no longer valid.  we must clear it so
     // that begin_setup_shmat() will be called again
     tcp->childshm = NULL;
   }
