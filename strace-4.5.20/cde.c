@@ -97,22 +97,31 @@ static void add_file_dependency(struct tcb* tcp) {
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
 
+extern char* basename (const char *fname); // to shut up gcc warnings
+
 // redirect request for opened_filename to a version within cde-root/
 static void redirect_filename(struct tcb* tcp) {
   assert(CDE_exec_mode);
   assert(tcp->opened_filename);
 
+  // don't redirect certain special filenames
+  // .Xauthority is used for X11 authentication via ssh, so we need to
+  // use the REAL version and not the one in cde-root/
+  if (strcmp(basename(tcp->opened_filename), ".Xauthority") == 0) {
+    return;
+  }
+
   if (!tcp->childshm) {
     begin_setup_shmat(tcp);
-    // no more need for filename
+    // no more need for filename, so don't leak it
     free(tcp->opened_filename);
     tcp->opened_filename = NULL;
 
     return; // MUST punt early here!!!
   }
 
-  // redirect all requests for relative path to version within cde-root/
-  // if they exist
+  // redirect all requests for absolute paths to version within cde-root/
+  // if those files exist!
   if (tcp->opened_filename[0] == '/') {
     assert(tcp->childshm);
 
@@ -127,7 +136,7 @@ static void redirect_filename(struct tcb* tcp) {
     if (!abs_path) {
       assert(errno);
       free(rel_path);
-      return; // must punt early!
+      return; // non-existent file --- must punt early!
     }
     EXITIF(errno);
 
