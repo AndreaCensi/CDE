@@ -6,7 +6,6 @@ char CDE_exec_mode;
 
 static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
-static void lazy_copy_file(char* src_filename, char* dst_filename);
 
 // to shut up gcc without going through header hell
 extern char* canonicalize_file_name(const char *name);
@@ -30,6 +29,43 @@ struct path* path_dup(struct path* path);
 struct path *new_path();
 void delete_path(struct path *path);
 void path_pop(struct path* p);
+
+
+// if modtime($dst_filename) < modtime($src_filename):
+//   cp $src_filename $dst_filename
+void lazy_copy_file(char* src_filename, char* dst_filename) {
+  int inF;
+  int outF;
+  int bytes;
+  char buf[4096]; // TODO: consider using BUFSIZ if it works better
+
+  // lazy optimization ... only do a copy if dst is older than src
+  struct stat inF_stat;
+  struct stat outF_stat;
+  EXITIF(stat(src_filename, &inF_stat) < 0); // this had better exist
+
+  // if dst file exists and is not older than src file, then punt
+  if (stat(dst_filename, &outF_stat) == 0) {
+    if (outF_stat.st_mtime >= inF_stat.st_mtime) {
+      //printf("PUNTED on %s\n", dst_filename);
+      return;
+    }
+  }
+
+  //printf("COPY %s %s\n", src_filename, dst_filename);
+
+  // do a full-on copy
+  EXITIF((inF = open(src_filename, O_RDONLY)) < 0);
+  // create with permissive perms
+  EXITIF((outF = open(dst_filename, O_WRONLY | O_CREAT, 0777)) < 0);
+
+  while ((bytes = read(inF, buf, sizeof(buf))) > 0) {
+    write(outF, buf, bytes);
+  }
+    
+  close(inF);
+  close(outF);
+}
 
 
 static void add_file_dependency(struct tcb* tcp) {
@@ -523,43 +559,6 @@ struct path* str2path(char* path) {
 
   free(path_dup_base);
   return base;
-}
-
-
-// if modtime($dst_filename) < modtime($src_filename):
-//   cp $src_filename $dst_filename
-static void lazy_copy_file(char* src_filename, char* dst_filename) {
-  int inF;
-  int outF;
-  int bytes;
-  char buf[4096]; // TODO: consider using BUFSIZ if it works better
-
-  // lazy optimization ... only do a copy if dst is older than src
-  struct stat inF_stat;
-  struct stat outF_stat;
-  EXITIF(stat(src_filename, &inF_stat) < 0); // this had better exist
-
-  // if dst file exists and is not older than src file, then punt
-  if (stat(dst_filename, &outF_stat) == 0) {
-    if (outF_stat.st_mtime >= inF_stat.st_mtime) {
-      //printf("PUNTED on %s\n", dst_filename);
-      return;
-    }
-  }
-
-  //printf("COPY %s %s\n", src_filename, dst_filename);
-
-  // do a full-on copy
-  EXITIF((inF = open(src_filename, O_RDONLY)) < 0);
-  // create with permissive perms
-  EXITIF((outF = open(dst_filename, O_WRONLY | O_CREAT, 0777)) < 0);
-
-  while ((bytes = read(inF, buf, sizeof(buf))) > 0) {
-    write(outF, buf, bytes);
-  }
-    
-  close(inF);
-  close(outF);
 }
 
 

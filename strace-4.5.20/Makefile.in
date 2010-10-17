@@ -306,7 +306,6 @@ EXTRA_DIST = $(man_MANS) errnoent.sh signalent.sh syscallent.sh ioctlsort.c \
 all: $(BUILT_SOURCES) config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
 	mv strace cde # pgbovine
-	cp cde cde-exec # pgbovine
 
 .SUFFIXES:
 .SUFFIXES: .c .o .obj

@@ -92,6 +92,7 @@ extern char *optarg;
 extern char CDE_exec_mode;
 extern void alloc_tcb_CDE_fields(struct tcb* tcp);
 extern void free_tcb_CDE_fields(struct tcb* tcp);
+extern void lazy_copy_file(char* src_filename, char* dst_filename);
 
 
 int debug = 0, followfork = 0;
@@ -784,6 +785,12 @@ main(int argc, char *argv[])
   }
   else {
     CDE_exec_mode = 0;
+
+    // pgbovine - copy 'cde' executable to pwd and rename it 'cde-exec',
+    // so that it can be included in the executable
+    if (argv[0]) {
+      lazy_copy_file(argv[0], "cde-exec");
+    }
   }
 
   // pgbovine - allow most slutty of permissions for new files/directories
