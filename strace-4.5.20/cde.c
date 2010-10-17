@@ -36,8 +36,16 @@ static void add_file_dependency(struct tcb* tcp) {
   char* filename = tcp->opened_filename;
   assert(filename);
 
+  // this will NOT follow the symlink ...
   struct stat st;
-  EXITIF(stat(filename, &st));
+  EXITIF(lstat(filename, &st));
+  char is_symlink = S_ISLNK(st.st_mode);
+
+  if (is_symlink) {
+    // this will follow the symlink ...
+    EXITIF(stat(filename, &st));
+  }
+
   // check whether it's a REGULAR-ASS file
   if (S_ISREG(st.st_mode)) {
     // assume that relative paths are in working directory,
@@ -69,11 +77,14 @@ static void add_file_dependency(struct tcb* tcp) {
 
       // finally, 'copy' filename over to rel_path
       // 1.) try a hard link for efficiency
-      // 2.) if that fails, then do a straight-up copy 
-
+      // 2.) if that fails, then do a straight-up copy
+      //
+      // don't hard link symlinks since they're simply textual
+      // references to the real files; just straight-up copy them
+      //
       // EEXIST means the file already exists, which isn't
       // really a hard link failure ...
-      if (link(filename, rel_path) && (errno != EEXIST)) {
+      if (is_symlink || (link(filename, rel_path) && (errno != EEXIST))) {
         lazy_copy_file(filename, rel_path);
       }
 
@@ -500,7 +511,6 @@ static void lazy_copy_file(char* src_filename, char* dst_filename) {
   int bytes;
   char buf[4096]; // TODO: consider using BUFSIZ if it works better
 
-
   // lazy optimization ... only do a copy if dst is older than src
   struct stat inF_stat;
   struct stat outF_stat;
@@ -513,6 +523,8 @@ static void lazy_copy_file(char* src_filename, char* dst_filename) {
       return;
     }
   }
+
+  //printf("COPY %s %s\n", src_filename, dst_filename);
 
   // do a full-on copy
   EXITIF((inF = open(src_filename, O_RDONLY)) < 0);
