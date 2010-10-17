@@ -104,10 +104,14 @@ static void redirect_filename(struct tcb* tcp) {
   assert(CDE_exec_mode);
   assert(tcp->opened_filename);
 
-  // don't redirect certain special filenames
+  // don't redirect certain special paths
+  // /dev and /proc are special system directories with fake files
+  //
   // .Xauthority is used for X11 authentication via ssh, so we need to
   // use the REAL version and not the one in cde-root/
-  if (strcmp(basename(tcp->opened_filename), ".Xauthority") == 0) {
+  if ((strncmp(tcp->opened_filename, "/dev/", 5) == 0) ||
+      (strncmp(tcp->opened_filename, "/proc/", 6) == 0) ||
+      (strcmp(basename(tcp->opened_filename), ".Xauthority") == 0)) {
     return;
   }
 
@@ -122,6 +126,8 @@ static void redirect_filename(struct tcb* tcp) {
 
   // redirect all requests for absolute paths to version within cde-root/
   // if those files exist!
+  // TODO: make this more accurate using canonicalize_file_name(),
+  // since it currently doesn't handle cases like '../../hello.txt'
   if (tcp->opened_filename[0] == '/') {
     assert(tcp->childshm);
 
@@ -131,18 +137,9 @@ static void redirect_filename(struct tcb* tcp) {
     strcpy(rel_path, "cde-root");
     strcat(rel_path, tcp->opened_filename);
 
-    errno = 0;
-    char* abs_path = canonicalize_file_name(rel_path);
-    if (!abs_path) {
-      assert(errno);
-      free(rel_path);
-      return; // non-existent file --- must punt early!
-    }
-    EXITIF(errno);
+    strcpy(tcp->localshm, rel_path); // hopefully this doesn't overflow :0
 
-    strcpy(tcp->localshm, abs_path); // hopefully this doesn't overflow :0
-
-    //printf("open %s\n", tcp->localshm);
+    //printf("redirect %s\n", tcp->localshm);
     //static char tmp[MAXPATHLEN + 1];
     //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
     //printf("     %s\n", tmp);
@@ -152,31 +149,30 @@ static void redirect_filename(struct tcb* tcp) {
     cur_regs.ebx = (long)tcp->childshm;
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
-    free(abs_path);
     free(rel_path);
   }
 }
 
 
 void CDE_begin_file_open(struct tcb* tcp) {
-  // only track files opened in read-only or read-write mode:
-  char open_mode = (tcp->u_arg[1] & 0x3);
-  if (open_mode == O_RDONLY || open_mode == O_RDWR) {
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
 
-    assert(!tcp->opened_filename);
-    EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-    tcp->opened_filename = strdup(path);
+  // TODO: should we only track files opened in read-only or read-write
+  // modes?  right now, we track files opened in ANY mode
+  //
+  // relevant code snippets:
+  //   char open_mode = (tcp->u_arg[1] & 0x3);
+  //   if (open_mode == O_RDONLY || open_mode == O_RDWR) { ... }
 
-    if (CDE_exec_mode) {
-      redirect_filename(tcp);
-    }
+  if (CDE_exec_mode) {
+    redirect_filename(tcp);
   }
 }
 
 void CDE_end_file_open(struct tcb* tcp) {
-  if (!tcp->opened_filename) {
-    return;
-  }
+  assert(tcp->opened_filename);
  
   if (CDE_exec_mode) {
     // empty
@@ -250,6 +246,24 @@ void CDE_end_file_stat(struct tcb* tcp) {
     }
   }
 
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+void CDE_begin_file_unlink(struct tcb* tcp) {
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
+
+  if (CDE_exec_mode) {
+    redirect_filename(tcp);
+  }
+  else {
+    // TODO: delete the copy of the file in cde-root/
+    //       in addition to deleting it from its original location
+  }
+
+  // no need for this anymore
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
 }

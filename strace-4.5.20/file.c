@@ -332,6 +332,7 @@ extern void CDE_begin_file_open(struct tcb* tcp);
 extern void CDE_end_file_open(struct tcb* tcp);
 extern void CDE_begin_file_stat(struct tcb* tcp);
 extern void CDE_end_file_stat(struct tcb* tcp);
+extern void CDE_begin_file_unlink(struct tcb* tcp);
 
 
 /* The fd is an "int", so when decoding x86 on x86_64, we need to force sign
@@ -1978,10 +1979,18 @@ sys_linkat(struct tcb *tcp)
 int
 sys_unlink(struct tcb *tcp)
 {
+  // modified by pgbovine
+  if (entering(tcp)) {
+    CDE_begin_file_unlink(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 	}
 	return 0;
+  */
 }
 
 #ifdef LINUX
