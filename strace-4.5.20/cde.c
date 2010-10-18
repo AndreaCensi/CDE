@@ -271,8 +271,33 @@ void CDE_end_file_stat(struct tcb* tcp) {
   else {
     // return value of 0 means a successful call
     if (tcp->u_rval == 0) {
-      // TODO: perhaps save an 'empty' file or directory if the real
-      // file/dir exists?
+      // programs usually do a stat to check the status of a directory
+      // ... if it's actually a directory, then mkdir it
+      struct stat st;
+      EXITIF(umove(tcp, tcp->u_arg[1], &st) < 0);
+      if (S_ISDIR(st.st_mode)) {
+        // actually create that directory within cde-root/
+        // (some code is copied-and-pasted, so refactor later if necessary)
+
+        // modify filename so that it appears as a RELATIVE PATH
+        // within a cde-root/ sub-directory
+        char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+        strcpy(rel_path, "cde-root");
+        strcat(rel_path, tcp->opened_filename);
+
+        struct path* p = str2path(rel_path);
+
+        // now mkdir all directories specified in rel_path
+        int i;
+        for (i = 1; i <= p->depth; i++) {
+          char* dn = path2str(p, i);
+          mkdir(dn, 0777);
+          free(dn);
+        }
+
+        delete_path(p);
+        free(rel_path);
+      }
     }
   }
 
