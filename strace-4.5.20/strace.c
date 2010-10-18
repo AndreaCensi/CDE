@@ -791,6 +791,20 @@ main(int argc, char *argv[])
     if (argv[0]) {
       lazy_copy_file(argv[0], "cde-exec");
     }
+
+    // pgbovine - append the command line to cde.log in pwd, so that the
+    // user on the other end knows exactly how to run the command
+    FILE* log = fopen("cde.log", "a");
+    if (log) {
+      fprintf(log, "./cde-exec");
+      int i;
+      for (i = 1; i < argc; i++) {
+        fprintf(log, " ");
+        fprintf(log, argv[i]);
+      }
+      fprintf(log, "\n");
+      fclose(log);
+    }
   }
 
   // pgbovine - allow most slutty of permissions for new files/directories
