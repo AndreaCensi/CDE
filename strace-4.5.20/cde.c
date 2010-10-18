@@ -68,8 +68,7 @@ void lazy_copy_file(char* src_filename, char* dst_filename) {
 }
 
 
-static void add_file_dependency(struct tcb* tcp) {
-  char* filename = tcp->opened_filename;
+static void copy_file_into_package(char* filename) {
   assert(filename);
 
   // this will NOT follow the symlink ...
@@ -217,7 +216,7 @@ void CDE_end_file_open(struct tcb* tcp) {
     // non-negative return value means that the call returned
     // successfully with a known file descriptor
     if (tcp->u_rval >= 0) {
-      add_file_dependency(tcp);
+      copy_file_into_package(tcp->opened_filename);
     }
   }
 
@@ -248,7 +247,7 @@ void CDE_end_execve(struct tcb* tcp) {
   else {
     // return value of 0 means a successful call
     if (tcp->u_rval == 0) {
-      add_file_dependency(tcp);
+      copy_file_into_package(tcp->opened_filename);
     }
   }
 
