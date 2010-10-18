@@ -7,8 +7,6 @@ char CDE_exec_mode;
 static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 
-// to shut up gcc without going through header hell
-extern char* canonicalize_file_name(const char *name);
 
 /* A structure to represent paths. */
 struct namecomp {
@@ -89,9 +87,6 @@ static void copy_file_into_package(char* filename) {
     // TODO: this isn't a perfect assumption since a
     // relative path could be something like '../data.txt',
     // which this won't pick up :)
-    //   WOW, this libc function seems useful for
-    //   canonicalizing filenames:
-    //     char* canonicalize_file_name (const char *name)
     if (filename[0] == '/') {
       // modify filename so that it appears as a RELATIVE PATH
       // within a cde-root/ sub-directory
@@ -161,8 +156,8 @@ static void redirect_filename(struct tcb* tcp) {
 
   // redirect all requests for absolute paths to version within cde-root/
   // if those files exist!
-  // TODO: make this more accurate using canonicalize_file_name(),
-  // since it currently doesn't handle cases like '../../hello.txt'
+  // TODO: make this more accurate since it currently doesn't handle cases
+  // like '../../hello.txt'
   if (tcp->opened_filename[0] == '/') {
     assert(tcp->childshm);
 
