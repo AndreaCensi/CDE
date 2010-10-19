@@ -92,7 +92,7 @@ extern char *optarg;
 extern char CDE_exec_mode;
 extern void alloc_tcb_CDE_fields(struct tcb* tcp);
 extern void free_tcb_CDE_fields(struct tcb* tcp);
-extern void lazy_copy_file(char* src_filename, char* dst_filename);
+extern void copy_file(char* src_filename, char* dst_filename);
 
 
 int debug = 0, followfork = 0;
@@ -526,6 +526,8 @@ startup_child (char **argv)
 	struct stat statbuf;
 	const char *filename;
 	char pathname[MAXPATHLEN];
+	char path_to_check[MAXPATHLEN];
+  path_to_check[0] = '\0';
 	int pid = 0;
 	struct tcb *tcp;
 
@@ -675,7 +677,17 @@ startup_child (char **argv)
 				pathname[len++] = '/';
 			strcpy(pathname + len, filename);
 
-			if (stat(pathname, &statbuf) == 0 &&
+      // pgbovine - if we're in CDE_exec_mode, then check for the
+      // existence of a path WITHIN cde-root
+      if (CDE_exec_mode) {
+        strcpy(path_to_check, "cde-root/");
+        strcat(path_to_check, pathname);
+      }
+      else {
+        strcpy(path_to_check, pathname);
+      }
+
+			if (stat(path_to_check, &statbuf) == 0 &&
 			    /* Accept only regular files
 			       with some execute bits set.
 			       XXX not perfect, might still fail */
@@ -686,6 +698,9 @@ startup_child (char **argv)
 	}
 
   // pgbovine - adjust argv[1] to the expanded FULL path of the target program
+  // remember to use pathname, NOT path_to_check, since ld-linux.so.2
+  // expects the original path (and cde will intercept and redirect it
+  // into cde-root/ appropriately)
   argv[1] = pathname;
 
   // pgbovine - debug output
@@ -694,7 +709,8 @@ startup_child (char **argv)
   //printf("argv[2] = %s\n", argv[2]);
   //printf("pathname = %s\n", pathname);
 
-	if (stat(pathname, &statbuf) < 0) {
+  // pgbovine - remember to use path_to_check here, NOT pathname
+	if (stat(path_to_check, &statbuf) < 0) {
 		fprintf(stderr, "%s: %s: command not found\n",
 			progname, filename);
 		exit(1);
