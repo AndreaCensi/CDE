@@ -6,6 +6,7 @@ char CDE_exec_mode;
 
 static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
+static void find_and_copy_possible_dynload_libs(char* filename);
 
 
 /* A structure to represent paths. */
@@ -29,26 +30,20 @@ void delete_path(struct path *path);
 void path_pop(struct path* p);
 
 
-// if modtime($dst_filename) < modtime($src_filename):
-//   cp $src_filename $dst_filename
-void lazy_copy_file(char* src_filename, char* dst_filename) {
+// used as a temporary holding space for paths copied from child process
+static char path[MAXPATHLEN + 1]; 
+
+// to shut up gcc warnings
+extern char* basename(const char *fname);
+extern char *dirname(char *path);
+
+
+// cp $src_filename $dst_filename
+void copy_file(char* src_filename, char* dst_filename) {
   int inF;
   int outF;
   int bytes;
   char buf[4096]; // TODO: consider using BUFSIZ if it works better
-
-  // lazy optimization ... only do a copy if dst is older than src
-  struct stat inF_stat;
-  struct stat outF_stat;
-  EXITIF(stat(src_filename, &inF_stat) < 0); // this had better exist
-
-  // if dst file exists and is not older than src file, then punt
-  if (stat(dst_filename, &outF_stat) == 0) {
-    if (outF_stat.st_mtime >= inF_stat.st_mtime) {
-      //printf("PUNTED on %s\n", dst_filename);
-      return;
-    }
-  }
 
   //printf("COPY %s %s\n", src_filename, dst_filename);
 
@@ -70,17 +65,17 @@ static void copy_file_into_package(char* filename) {
   assert(filename);
 
   // this will NOT follow the symlink ...
-  struct stat st;
-  EXITIF(lstat(filename, &st));
-  char is_symlink = S_ISLNK(st.st_mode);
+  struct stat filename_stat;
+  EXITIF(lstat(filename, &filename_stat));
+  char is_symlink = S_ISLNK(filename_stat.st_mode);
 
   if (is_symlink) {
     // this will follow the symlink ...
-    EXITIF(stat(filename, &st));
+    EXITIF(stat(filename, &filename_stat));
   }
 
   // check whether it's a REGULAR-ASS file
-  if (S_ISREG(st.st_mode)) {
+  if (S_ISREG(filename_stat.st_mode)) {
     // assume that relative paths are in working directory,
     // so no need to grab those files
     //
@@ -90,14 +85,26 @@ static void copy_file_into_package(char* filename) {
     if (filename[0] == '/') {
       // modify filename so that it appears as a RELATIVE PATH
       // within a cde-root/ sub-directory
-      char* rel_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-      strcpy(rel_path, "cde-root");
-      strcat(rel_path, filename);
+      char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+      strcpy(dst_path, "cde-root");
+      strcat(dst_path, filename);
 
-      struct path* p = str2path(rel_path);
+      // lazy optimization to avoid redundant copies ...
+      struct stat dst_path_stat;
+      if (lstat(dst_path, &dst_path_stat) == 0) {
+        // if the destination file exists and is newer than the original
+        // filename, then don't do anything!
+        if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
+          //printf("PUNTED on %s\n", dst_path);
+          free(dst_path);
+          return;
+        }
+      }
+
+      struct path* p = str2path(dst_path);
       path_pop(p); // ignore filename portion to leave just the dirname
 
-      // now mkdir all directories specified in rel_path
+      // now mkdir all directories specified in dst_path
       int i;
       for (i = 1; i <= p->depth; i++) {
         char* dn = path2str(p, i);
@@ -105,7 +112,7 @@ static void copy_file_into_package(char* filename) {
         free(dn);
       }
 
-      // finally, 'copy' filename over to rel_path
+      // finally, 'copy' filename over to dst_path
       // 1.) try a hard link for efficiency
       // 2.) if that fails, then do a straight-up copy
       //
@@ -114,94 +121,81 @@ static void copy_file_into_package(char* filename) {
       //
       // EEXIST means the file already exists, which isn't
       // really a hard link failure ...
-      if (is_symlink || (link(filename, rel_path) && (errno != EEXIST))) {
-        lazy_copy_file(filename, rel_path);
+      if (is_symlink || (link(filename, dst_path) && (errno != EEXIST))) {
+        copy_file(filename, dst_path);
       }
 
+      // if it's a shared library, then heuristically try to grep
+      // through it to find whether it might dynamically load any other
+      // libraries (e.g., those for other CPU types that we can't pick
+      // up via strace)
+      find_and_copy_possible_dynload_libs(filename);
+
       delete_path(p);
-      free(rel_path);
+      free(dst_path);
     }
   }
 }
 
 
-#define STRING_MIN 4 // minimum length of sequence to trigger output
-#define STRING_ISGRAPHIC(c) \
-  ( (c) >= 0 && (c) <= 255 && ((c) == '\t' || (isascii (c) && isprint (c))) )
+#define STRING_ISGRAPHIC(c) ( ((c) == '\t' || (isascii (c) && isprint (c))) )
 
 /* If filename is an ELF binary file, then do a binary grep through it
    looking for strings that might be '.so' files, as well as dlopen*,
    which is a function call to dynamically load an .so file.  Find
    whether any of the .so files exist in the same directory as filename,
    and if so, COPY them into cde-root/ as well.
+
+   The purpose of this hack is to pick up on libraries for alternative
+   CPU types that weren't picked up when running on this machine.  When
+   the package is ported to another machine, the program might load one
+   of these alternative libraries.
   
    Note that this heuristic might lead to false positives (incidental
    matches) and false negatives (cannot find dynamically-generated
    strings).  
   
    code adapted from the string program (strings.c) in GNU binutils */
-void find_and_copy_possible_dynload_libs(char* filename) {
+static void find_and_copy_possible_dynload_libs(char* filename) {
   FILE* f = fopen(filename, "rb"); // open in binary mode
   if (!f) {
     return;
   }
 
   char header[5];
+  memset(header, 0, sizeof(header));
   fgets(header, 5, f); // 5 means 4 bytes + 1 null terminating byte
 
-  // if it's not even an ELF binary, then punt early
+  // if it's not even an ELF binary, then punt early for efficiency
   if (strcmp(header, "\177ELF") != 0) {
-    printf("Sorry, not ELF\n");
+    //printf("Sorry, not ELF %s\n", filename);
+    fclose(f);
     return;
   }
 
+  int i;
   int dlopen_found = 0; // did we find a symbol starting with 'dlopen'?
 
-  char buf[STRING_MIN + 1];
-  
   static char cur_string[4096];
+  cur_string[0] = '\0';
   int cur_ind = 0;
 
-  // it's unrealistic to expect more than 100, right???
-  char* libs_to_check[100];
+  // it's unrealistic to expect more than 50, right???
+  char* libs_to_check[50];
   int libs_to_check_ind = 0;
 
-  cur_string[0] = '\0';
-
   while (1) {
-    int i;
-    long c;
-
-    /* See if the next `string_min' chars are all graphic chars.  */
-tryline:
-    for (i = 0; i < STRING_MIN; i++) {
-      c = getc(f);
-      if (c == EOF) {
-        goto done;
-      }
-      if (! STRING_ISGRAPHIC (c))
-        /* Found a non-graphic.  Try again starting with next char.  */
-        goto tryline;
-      buf[i] = c;
-    }
-
-    /* We found a run of `STRING_MIN' graphic characters.  Print up to the next non-graphic character.  */
-    buf[i] = '\0';
-
-    strcpy(cur_string, buf);
-    cur_ind += STRING_MIN;
 
     while (1) {
-      c = getc(f);
+      int c = getc(f);
       if (c == EOF)
-        break;
-      if (! STRING_ISGRAPHIC (c))
+        goto done;
+      if (!STRING_ISGRAPHIC(c))
         break;
 
-      cur_string[cur_ind] = c;
-      // don't overflow ... just clobber off the end if too long ;)
+      // don't overflow ... just truncate off of end
       if (cur_ind < sizeof(cur_string) - 1) {
-        cur_ind++;
+        cur_string[cur_ind++] = c;
       }
     }
 
@@ -210,19 +204,20 @@ tryline:
 
     int cur_strlen = strlen(cur_string);
 
-    // check that it ends with '.so'
-    if ((cur_string[cur_strlen - 3] == '.') &&
-        (cur_string[cur_strlen - 2] == 's') &&
-        (cur_string[cur_strlen - 1] == 'o')) {
-      //printf("  %s\n", cur_string);
+    // don't even bother for short strings:
+    if (cur_strlen >= 4) {
+      // check that it ends with '.so'
+      if ((cur_string[cur_strlen - 3] == '.') &&
+          (cur_string[cur_strlen - 2] == 's') &&
+          (cur_string[cur_strlen - 1] == 'o')) {
 
-      libs_to_check[libs_to_check_ind] = strdup(cur_string);
-      libs_to_check_ind++;
-      assert(libs_to_check_ind < 100); // bounds check
-    }
+        libs_to_check[libs_to_check_ind++] = strdup(cur_string);
+        assert(libs_to_check_ind < 50); // bounds check
+      }
 
-    if (strncmp(cur_string, "dlopen", 6) == 0) {
-      dlopen_found = 1;
+      if (strncmp(cur_string, "dlopen", 6) == 0) {
+        dlopen_found = 1;
+      }
     }
 
     // reset buffer
@@ -231,14 +226,28 @@ tryline:
   }
 
 
-  int i;
-
 done:
+  // for efficiency and to prevent false positives,
   // only do filesystem checks if dlopen has been found
   if (dlopen_found) {
+    char* filename_copy = strdup(filename); // dirname() destroys its arg
+    char* dn = dirname(filename_copy);
+
     for (i = 0; i < libs_to_check_ind; i++) {
-      printf("  %s\n", libs_to_check[i]);
+      static char lib_fullpath[4096];
+      strcpy(lib_fullpath, dn);
+      strcat(lib_fullpath, "/");
+      strcat(lib_fullpath, libs_to_check[i]);
+
+      // if the target library exists, then copy it into our package
+      struct stat st;
+      if (stat(lib_fullpath, &st) == 0) {
+        //printf("%s %s\n", filename, lib_fullpath);
+        copy_file_into_package(lib_fullpath);
+      }
     }
+
+    free(filename_copy);
   }
 
 
@@ -249,13 +258,6 @@ done:
   fclose(f);
 }
 
-
-
-
-// used as a temporary holding space for paths copied from child process
-static char path[MAXPATHLEN + 1]; 
-
-extern char* basename (const char *fname); // to shut up gcc warnings
 
 // redirect request for opened_filename to a version within cde-root/
 static void redirect_filename(struct tcb* tcp) {
@@ -302,11 +304,11 @@ static void redirect_filename(struct tcb* tcp) {
 
     // modify filename so that it appears as a RELATIVE PATH
     // within a cde-root/ sub-directory
-    char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
-    strcpy(rel_path, "cde-root");
-    strcat(rel_path, tcp->opened_filename);
+    char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+    strcpy(dst_path, "cde-root");
+    strcat(dst_path, tcp->opened_filename);
 
-    strcpy(tcp->localshm, rel_path); // hopefully this doesn't overflow :0
+    strcpy(tcp->localshm, dst_path); // hopefully this doesn't overflow :0
 
     //printf("  redirect %s\n", tcp->localshm);
     //static char tmp[MAXPATHLEN + 1];
@@ -318,7 +320,7 @@ static void redirect_filename(struct tcb* tcp) {
     cur_regs.ebx = (long)tcp->childshm;
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
-    free(rel_path);
+    free(dst_path);
   }
   else {
     //printf("  NO redirect %s\n", tcp->opened_filename);
@@ -423,13 +425,13 @@ void CDE_end_file_stat(struct tcb* tcp) {
 
         // modify filename so that it appears as a RELATIVE PATH
         // within a cde-root/ sub-directory
-        char* rel_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
-        strcpy(rel_path, "cde-root");
-        strcat(rel_path, tcp->opened_filename);
+        char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+        strcpy(dst_path, "cde-root");
+        strcat(dst_path, tcp->opened_filename);
 
-        struct path* p = str2path(rel_path);
+        struct path* p = str2path(dst_path);
 
-        // now mkdir all directories specified in rel_path
+        // now mkdir all directories specified in dst_path
         int i;
         for (i = 1; i <= p->depth; i++) {
           char* dn = path2str(p, i);
@@ -438,7 +440,7 @@ void CDE_end_file_stat(struct tcb* tcp) {
         }
 
         delete_path(p);
-        free(rel_path);
+        free(dst_path);
       }
     }
   }

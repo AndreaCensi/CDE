@@ -825,7 +825,7 @@ main(int argc, char *argv[])
     // pgbovine - copy 'cde' executable to pwd and rename it 'cde-exec',
     // so that it can be included in the executable
     if (argv[0]) {
-      lazy_copy_file(argv[0], "cde-exec");
+      copy_file(argv[0], "cde-exec");
     }
 
     // pgbovine - append the command line to cde.log in pwd, so that the
