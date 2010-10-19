@@ -124,6 +124,134 @@ static void copy_file_into_package(char* filename) {
   }
 }
 
+
+#define STRING_MIN 4 // minimum length of sequence to trigger output
+#define STRING_ISGRAPHIC(c) \
+  ( (c) >= 0 && (c) <= 255 && ((c) == '\t' || (isascii (c) && isprint (c))) )
+
+/* If filename is an ELF binary file, then do a binary grep through it
+   looking for strings that might be '.so' files, as well as dlopen*,
+   which is a function call to dynamically load an .so file.  Find
+   whether any of the .so files exist in the same directory as filename,
+   and if so, COPY them into cde-root/ as well.
+  
+   Note that this heuristic might lead to false positives (incidental
+   matches) and false negatives (cannot find dynamically-generated
+   strings).  
+  
+   code adapted from the string program (strings.c) in GNU binutils */
+void find_and_copy_possible_dynload_libs(char* filename) {
+  FILE* f = fopen(filename, "rb"); // open in binary mode
+  if (!f) {
+    return;
+  }
+
+  char header[5];
+  fgets(header, 5, f); // 5 means 4 bytes + 1 null terminating byte
+
+  // if it's not even an ELF binary, then punt early
+  if (strcmp(header, "\177ELF") != 0) {
+    printf("Sorry, not ELF\n");
+    return;
+  }
+
+  int dlopen_found = 0; // did we find a symbol starting with 'dlopen'?
+
+  char buf[STRING_MIN + 1];
+  
+  static char cur_string[4096];
+  int cur_ind = 0;
+
+  // it's unrealistic to expect more than 100, right???
+  char* libs_to_check[100];
+  int libs_to_check_ind = 0;
+
+  cur_string[0] = '\0';
+
+  while (1) {
+    int i;
+    long c;
+
+    /* See if the next `string_min' chars are all graphic chars.  */
+tryline:
+    for (i = 0; i < STRING_MIN; i++) {
+      c = getc(f);
+      if (c == EOF) {
+        goto done;
+      }
+      if (! STRING_ISGRAPHIC (c))
+        /* Found a non-graphic.  Try again starting with next char.  */
+        goto tryline;
+      buf[i] = c;
+    }
+
+    /* We found a run of `STRING_MIN' graphic characters.  Print up to the next non-graphic character.  */
+    buf[i] = '\0';
+
+    strcpy(cur_string, buf);
+    cur_ind += STRING_MIN;
+
+    while (1) {
+      c = getc(f);
+      if (c == EOF)
+        break;
+      if (! STRING_ISGRAPHIC (c))
+        break;
+
+      cur_string[cur_ind] = c;
+      // don't overflow ... just clobber off the end if too long ;)
+      if (cur_ind < sizeof(cur_string) - 1) {
+        cur_ind++;
+      }
+    }
+
+    // done with a string
+    cur_string[cur_ind] = '\0';
+
+    int cur_strlen = strlen(cur_string);
+
+    // check that it ends with '.so'
+    if ((cur_string[cur_strlen - 3] == '.') &&
+        (cur_string[cur_strlen - 2] == 's') &&
+        (cur_string[cur_strlen - 1] == 'o')) {
+      //printf("  %s\n", cur_string);
+
+      libs_to_check[libs_to_check_ind] = strdup(cur_string);
+      libs_to_check_ind++;
+      assert(libs_to_check_ind < 100); // bounds check
+    }
+
+    if (strncmp(cur_string, "dlopen", 6) == 0) {
+      dlopen_found = 1;
+    }
+
+    // reset buffer
+    cur_string[0] = '\0';
+    cur_ind = 0;
+  }
+
+
+  int i;
+
+done:
+  // only do filesystem checks if dlopen has been found
+  if (dlopen_found) {
+    for (i = 0; i < libs_to_check_ind; i++) {
+      printf("  %s\n", libs_to_check[i]);
+    }
+  }
+
+
+  for (i = 0; i < libs_to_check_ind; i++) {
+    free(libs_to_check[i]);
+  }
+
+  fclose(f);
+}
+
+
+
+
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
 
@@ -134,6 +262,8 @@ static void redirect_filename(struct tcb* tcp) {
   assert(CDE_exec_mode);
   assert(tcp->opened_filename);
 
+  //printf("attempt %s\n", tcp->opened_filename);
+
   // don't redirect certain special paths
   // /dev and /proc are special system directories with fake files
   //
@@ -141,6 +271,15 @@ static void redirect_filename(struct tcb* tcp) {
   // use the REAL version and not the one in cde-root/
   if ((strncmp(tcp->opened_filename, "/dev/", 5) == 0) ||
       (strncmp(tcp->opened_filename, "/proc/", 6) == 0) ||
+
+      // we definitely need to use the system's own versions of these
+      // since they seem pretty intertwined with the kernel and distro:
+      (strcmp(tcp->opened_filename, "/lib/libc.so.6") == 0) ||
+      (strcmp(tcp->opened_filename, "/lib/libdl.so.2") == 0) ||
+      (strcmp(tcp->opened_filename, "/lib/libpthread.so.0") == 0) ||
+      // Python matplotlib plotting GUI requires this ...
+      (strcmp(tcp->opened_filename, "/lib/librt.so.1") == 0) ||
+
       (strcmp(basename(tcp->opened_filename), ".Xauthority") == 0)) {
     return;
   }
@@ -169,7 +308,7 @@ static void redirect_filename(struct tcb* tcp) {
 
     strcpy(tcp->localshm, rel_path); // hopefully this doesn't overflow :0
 
-    //printf("redirect %s\n", tcp->localshm);
+    //printf("  redirect %s\n", tcp->localshm);
     //static char tmp[MAXPATHLEN + 1];
     //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
     //printf("     %s\n", tmp);
@@ -180,6 +319,9 @@ static void redirect_filename(struct tcb* tcp) {
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
     free(rel_path);
+  }
+  else {
+    //printf("  NO redirect %s\n", tcp->opened_filename);
   }
 }
 

@@ -558,7 +558,7 @@ startup_child (char **argv)
     // pgbovine - muck with $PATH variable depending on CDE_exec_mode
     // TODO: can override other environment variables here too
     if (CDE_exec_mode) {
-      // read $PATH from "cde-root/cde.environment" file
+      // load environment variables from "cde-root/cde.environment" file
       FILE* envF = fopen("cde-root/cde.environment", "r");
       if (!envF) {
         perror("cde-root/cde.environment");
@@ -571,18 +571,44 @@ startup_child (char **argv)
       ssize_t read;
       while ((read = getline(&line, &len, envF)) != -1) {
         char* p;
+        char* stripped_str = NULL;
 
         char is_path = 0;
+        char is_user = 0;
+        char is_home = 0;
+
         for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
           // find PATH environment variable
           if (strcmp(p, "PATH") == 0) {
             is_path = 1;
             continue;
           }
+          else if (strcmp(p, "USER") == 0) {
+            is_user = 1;
+            continue;
+          }
+          else if (strcmp(p, "HOME") == 0) {
+            is_home = 1;
+            continue;
+          }
 
-          if (is_path) {
-            // clobber $PATH with saved value from our file
-            setenv("PATH", p, 1);
+          if (is_path || is_user || is_home) {
+            stripped_str = strdup(p);
+            if (stripped_str[strlen(stripped_str) - 1] == '\n') {
+              stripped_str[strlen(stripped_str) - 1] = '\0';
+            }
+
+            if (is_path) {
+              setenv("PATH", stripped_str, 1);
+            }
+            else if (is_user) {
+              setenv("USER", stripped_str, 1);
+            }
+            else {
+              setenv("HOME", stripped_str, 1);
+            }
+
+            free(stripped_str);
             break;
           }
         }
@@ -590,7 +616,7 @@ startup_child (char **argv)
       free(line);
     }
     else {
-      // save current value of $PATH to "cde-root/cde.environment" file
+      // save current value of selected environment vars to "cde-root/cde.environment" file
       mkdir("cde-root", 0777);
       FILE* envF = fopen("cde-root/cde.environment", "w");
       if (!envF) {
@@ -598,8 +624,18 @@ startup_child (char **argv)
         cleanup();
         exit(1);
       }
+
       fputs("PATH=", envF);
       fputs(getenv("PATH"), envF);
+      fputs("\n", envF);
+
+      fputs("USER=", envF);
+      fputs(getenv("USER"), envF);
+      fputs("\n", envF);
+
+      fputs("HOME=", envF);
+      fputs(getenv("HOME"), envF);
+
       fclose(envF);
     }
 
