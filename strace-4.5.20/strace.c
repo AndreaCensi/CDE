@@ -541,7 +541,7 @@ startup_child (char **argv)
   // create a new argv with ld-linux.so.2, the dynamic linker,
   // appended to the front (leaving one extra spot for trailing NULL)
   argv = (char**)malloc((num_args + 1 + 1) * sizeof(*argv));
-  argv[0] = "ld-linux.so.2";
+  argv[0] = "cde-root/ld-linux.so.2";
   int i;
   for (i = 1; i < (num_args + 1); i++) {
     argv[i] = orig_argv[i-1];
@@ -813,7 +813,7 @@ startup_child (char **argv)
 #endif /* !USE_PROCFS */
 
     // pgbovine - execute the dynamic linker, NOT the target program itself
-		execv("ld-linux.so.2", argv);
+		execv("cde-root/ld-linux.so.2", argv);
 		perror("strace: exec");
 		_exit(1);
 	}
@@ -861,8 +861,9 @@ main(int argc, char *argv[])
 
       copy_file(argv[0], "cde-exec");
 
+      mkdir("cde-root", 0777);
       // also copy over dynamic linker to pwd to include it in package
-      copy_file("/lib/ld-linux.so.2", "ld-linux.so.2");
+      copy_file("/lib/ld-linux.so.2", "cde-root/ld-linux.so.2");
     }
 
     // pgbovine - append the command line to cde.log in pwd, so that the
