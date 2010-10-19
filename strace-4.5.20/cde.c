@@ -273,15 +273,6 @@ static void redirect_filename(struct tcb* tcp) {
   // use the REAL version and not the one in cde-root/
   if ((strncmp(tcp->opened_filename, "/dev/", 5) == 0) ||
       (strncmp(tcp->opened_filename, "/proc/", 6) == 0) ||
-
-      // we definitely need to use the system's own versions of these
-      // since they seem pretty intertwined with the kernel and distro:
-      (strcmp(tcp->opened_filename, "/lib/libc.so.6") == 0) ||
-      (strcmp(tcp->opened_filename, "/lib/libdl.so.2") == 0) ||
-      (strcmp(tcp->opened_filename, "/lib/libpthread.so.0") == 0) ||
-      // Python matplotlib plotting GUI requires this ...
-      (strcmp(tcp->opened_filename, "/lib/librt.so.1") == 0) ||
-
       (strcmp(basename(tcp->opened_filename), ".Xauthority") == 0)) {
     return;
   }

@@ -530,10 +530,24 @@ startup_child (char **argv)
 	struct tcb *tcp;
 
   // pgbovine
-  char executable_path[MAXPATHLEN];
-  executable_path[0] = '\0';
+  char** orig_argv = argv;
+  int num_args = 0;
+  while(*argv++) {
+    num_args++;
+  }
 
-	filename = argv[0];
+  // create a new argv with ld-linux.so.2, the dynamic linker,
+  // appended to the front (leaving one extra spot for trailing NULL)
+  argv = (char**)malloc((num_args + 1 + 1) * sizeof(*argv));
+  argv[0] = "ld-linux.so.2";
+  int i;
+  for (i = 1; i < (num_args + 1); i++) {
+    argv[i] = orig_argv[i-1];
+  }
+  argv[num_args + 1] = NULL;
+
+  // the program's filename has been bumped back to argv[1]
+	filename = argv[1];
 	if (strchr(filename, '/')) {
 		if (strlen(filename) > sizeof pathname - 1) {
 			errno = ENAMETOOLONG;
@@ -661,18 +675,7 @@ startup_child (char **argv)
 				pathname[len++] = '/';
 			strcpy(pathname + len, filename);
 
-      // pgbovine
-      if (CDE_exec_mode) {
-        // use "cde-root/" prefix to find the version of executable
-        // that's in the CDE package
-        strcpy(executable_path, "cde-root");
-        strcat(executable_path, pathname);
-      }
-      else {
-        strcpy(executable_path, pathname);
-      }
-
-			if (stat(executable_path, &statbuf) == 0 &&
+			if (stat(pathname, &statbuf) == 0 &&
 			    /* Accept only regular files
 			       with some execute bits set.
 			       XXX not perfect, might still fail */
@@ -681,7 +684,17 @@ startup_child (char **argv)
 				break;
 		}
 	}
-	if (stat(executable_path, &statbuf) < 0) {
+
+  // pgbovine - adjust argv[1] to the expanded FULL path of the target program
+  argv[1] = pathname;
+
+  // pgbovine - debug output
+  //printf("argv[0] = %s\n", argv[0]);
+  //printf("argv[1] = %s\n", argv[1]);
+  //printf("argv[2] = %s\n", argv[2]);
+  //printf("pathname = %s\n", pathname);
+
+	if (stat(pathname, &statbuf) < 0) {
 		fprintf(stderr, "%s: %s: command not found\n",
 			progname, filename);
 		exit(1);
@@ -783,7 +796,8 @@ startup_child (char **argv)
 		}
 #endif /* !USE_PROCFS */
 
-		execv(executable_path, argv);
+    // pgbovine - execute the dynamic linker, NOT the target program itself
+		execv("ld-linux.so.2", argv);
 		perror("strace: exec");
 		_exit(1);
 	}
@@ -801,6 +815,8 @@ startup_child (char **argv)
 		exit(1);
 	}
 #endif /* USE_PROCFS */
+
+  free(argv); // prevent leak
 }
 
 int
@@ -825,7 +841,12 @@ main(int argc, char *argv[])
     // pgbovine - copy 'cde' executable to pwd and rename it 'cde-exec',
     // so that it can be included in the executable
     if (argv[0]) {
+      // TODO: make these into lazy copies:
+
       copy_file(argv[0], "cde-exec");
+
+      // also copy over dynamic linker to pwd to include it in package
+      copy_file("/lib/ld-linux.so.2", "ld-linux.so.2");
     }
 
     // pgbovine - append the command line to cde.log in pwd, so that the
