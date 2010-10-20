@@ -8,10 +8,7 @@ static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename);
 
-
-// make the shared memory page pretty big to accomodate argv arrays
-#define SHARED_PAGE_SIZE (MAXPATHLEN * 5)
-
+#define SHARED_PAGE_SIZE (MAXPATHLEN * 2)
 
 /* A structure to represent paths. */
 struct namecomp {
