@@ -530,8 +530,8 @@ startup_child (char **argv)
 	struct tcb *tcp;
 
   // pgbovine
-  char executable_path[MAXPATHLEN];
-  executable_path[0] = '\0';
+  char path_to_search[MAXPATHLEN];
+  path_to_search[0] = '\0';
 
 	filename = argv[0];
 	if (strchr(filename, '/')) {
@@ -665,14 +665,14 @@ startup_child (char **argv)
       if (CDE_exec_mode) {
         // use "cde-root/" prefix to find the version of executable
         // that's in the CDE package
-        strcpy(executable_path, "cde-root");
-        strcat(executable_path, pathname);
+        strcpy(path_to_search, "cde-root");
+        strcat(path_to_search, pathname);
       }
       else {
-        strcpy(executable_path, pathname);
+        strcpy(path_to_search, pathname);
       }
 
-			if (stat(executable_path, &statbuf) == 0 &&
+			if (stat(path_to_search, &statbuf) == 0 &&
 			    /* Accept only regular files
 			       with some execute bits set.
 			       XXX not perfect, might still fail */
@@ -681,7 +681,7 @@ startup_child (char **argv)
 				break;
 		}
 	}
-	if (stat(executable_path, &statbuf) < 0) {
+	if (stat(path_to_search, &statbuf) < 0) {
 		fprintf(stderr, "%s: %s: command not found\n",
 			progname, filename);
 		exit(1);
@@ -783,7 +783,10 @@ startup_child (char **argv)
 		}
 #endif /* !USE_PROCFS */
 
-		execv(executable_path, argv);
+    // pgbovine - subtle ... even though we look for the existence of
+    // path_to_search, we still want to execute pathname, since our
+    // CDE_begin_execve handler expects an original pristine pathname :)
+		execv(pathname, argv);
 		perror("strace: exec");
 		_exit(1);
 	}

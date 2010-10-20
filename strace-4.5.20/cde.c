@@ -33,6 +33,7 @@ struct path *new_path();
 void delete_path(struct path *path);
 void path_pop(struct path* p);
 
+static char* redirect_filename(char* filename);
 
 // used as a temporary holding space for paths copied from child process
 static char path[MAXPATHLEN + 1]; 
@@ -263,27 +264,28 @@ done:
 }
 
 
-// redirect request for opened_filename to a version within cde-root/
-static void redirect_filename(struct tcb* tcp) {
+// modify the first argument to the given system call to a path within
+// cde-root/, if applicable
+//
+// assumes tcp->opened_filename has already been set
+static void modify_syscall_first_arg(struct tcb* tcp) {
   assert(CDE_exec_mode);
   assert(tcp->opened_filename);
 
-  //printf("attempt %s\n", tcp->opened_filename);
+  char* redirected_filename = redirect_filename(tcp->opened_filename);
 
-  // don't redirect certain special paths
-  // /dev and /proc are special system directories with fake files
-  //
-  // .Xauthority is used for X11 authentication via ssh, so we need to
-  // use the REAL version and not the one in cde-root/
-  if ((strncmp(tcp->opened_filename, "/dev/", 5) == 0) ||
-      (strncmp(tcp->opened_filename, "/proc/", 6) == 0) ||
-      (strcmp(basename(tcp->opened_filename), ".Xauthority") == 0)) {
+  // do nothing if redirect_filename returns NULL ...
+  if (!redirected_filename) {
     return;
   }
 
+  //printf("attempt %s\n", tcp->opened_filename);
+
   if (!tcp->childshm) {
     begin_setup_shmat(tcp);
+
     // no more need for filename, so don't leak it
+    free(redirected_filename);
     free(tcp->opened_filename);
     tcp->opened_filename = NULL;
 
@@ -292,34 +294,53 @@ static void redirect_filename(struct tcb* tcp) {
 
   // redirect all requests for absolute paths to version within cde-root/
   // if those files exist!
+
+  strcpy(tcp->localshm, redirected_filename); // hopefully this doesn't overflow :0
+
+  //printf("  redirect %s\n", tcp->localshm);
+  //static char tmp[MAXPATHLEN + 1];
+  //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
+  //printf("     %s\n", tmp);
+
+  struct user_regs_struct cur_regs;
+  EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+  cur_regs.ebx = (long)tcp->childshm;
+  ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+
+  free(redirected_filename);
+}
+
+
+// create a malloc'ed filename that contains a version within cde-root/
+// return NULL if the filename should NOT be redirected
+static char* redirect_filename(char* filename) {
+  assert(filename);
+
+  // don't redirect certain special paths
+  // /dev and /proc are special system directories with fake files
+  //
+  // .Xauthority is used for X11 authentication via ssh, so we need to
+  // use the REAL version and not the one in cde-root/
+  if ((strncmp(filename, "/dev/", 5) == 0) ||
+      (strncmp(filename, "/proc/", 6) == 0) ||
+      (strcmp(basename(filename), ".Xauthority") == 0)) {
+    return NULL;
+  }
+
+  // redirect all requests for absolute paths to version within cde-root/
+  // if those files exist!
   // TODO: make this more accurate since it currently doesn't handle cases
   // like '../../hello.txt'
-  if (tcp->opened_filename[0] == '/') {
-    assert(tcp->childshm);
-
+  if (filename[0] == '/') {
     // modify filename so that it appears as a RELATIVE PATH
     // within a cde-root/ sub-directory
-    char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+    char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
     strcpy(dst_path, "cde-root");
-    strcat(dst_path, tcp->opened_filename);
-
-    strcpy(tcp->localshm, dst_path); // hopefully this doesn't overflow :0
-
-    //printf("  redirect %s\n", tcp->localshm);
-    //static char tmp[MAXPATHLEN + 1];
-    //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
-    //printf("     %s\n", tmp);
-
-    struct user_regs_struct cur_regs;
-    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
-    cur_regs.ebx = (long)tcp->childshm;
-    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
-
-    free(dst_path);
+    strcat(dst_path, filename);
+    return dst_path;
   }
-  else {
-    //printf("  NO redirect %s\n", tcp->opened_filename);
-  }
+
+  return NULL;
 }
 
 
@@ -336,7 +357,7 @@ void CDE_begin_file_open(struct tcb* tcp) {
   //   if (open_mode == O_RDONLY || open_mode == O_RDWR) { ... }
 
   if (CDE_exec_mode) {
-    redirect_filename(tcp);
+    modify_syscall_first_arg(tcp);
   }
 }
 
@@ -364,23 +385,93 @@ void CDE_begin_execve(struct tcb* tcp) {
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
   tcp->opened_filename = strdup(path);
 
-  // remember this is an address in the child's address space:
-  char** child_argv = (char**)tcp->u_arg[1];
-  char* cur_arg = NULL;
-  int i = 0;
-  printf("CDE_begin_execve %s\n", tcp->opened_filename);
-  while (1) {
-    EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, &cur_arg) < 0);
-    if (cur_arg == NULL) {
-      break;
-    }
-    EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
-    printf("  argv[%d] = %s\n", i, path);
-    i++;
-  }
-
   if (CDE_exec_mode) {
-    redirect_filename(tcp);
+
+    // set up shared memory segment if we haven't done so yet
+    if (!tcp->childshm) {
+      begin_setup_shmat(tcp);
+
+      // no more need for filename, so don't leak it
+      free(tcp->opened_filename);
+      tcp->opened_filename = NULL;
+
+      return; // MUST punt early here!!!
+    }
+
+
+    /* we're gonna do some craziness here to redirect the OS to call
+       cde-root/ld-linux.so.2 rather than the real program, since
+       ld-linux.so.2 is closely-tied with the version of libc in
+       cde-root/.
+
+       TODO: this will FAIL when trying to run statically-linked
+       executables, so in the future, we need to detect when an ELF
+       binary is statically-linked (i.e., it doesn't contain an INTERP
+       header when read by "readelf -l")
+      
+       let's set up the shared memory segment (tcp->localshm) like so:
+
+    base -->       tcp->localshm : "cde-root/ld-linux.so.2"
+    new_argv -->   argv pointers : point to tcp->childshm ("cde-root/ld-linux.so.2")
+                   argv pointers : point to tcp->u_arg[0] (original program name)
+                   argv pointers : point to child program's argv[1]
+                   argv pointers : point to child program's argv[2]
+                   argv pointers : point to child program's argv[3]
+                   argv pointers : [...]
+                   argv pointers : NULL
+
+        Note that we only need to do this if we're in CDE_exec_mode */
+
+    char* base = (char*)tcp->localshm;
+    strcpy(base, "cde-root/ld-linux.so.2");
+    int offset = strlen("cde-root/ld-linux.so.2") + 1;
+    char** new_argv = (char**)(base + offset);
+
+    // really subtle, these addresses should be in the CHILD's address space,
+    // not the parent's
+
+    // points to "cde-root/ld-linux.so.2"
+    new_argv[0] = (char*)tcp->childshm;
+    // points to original program name (full path)
+    new_argv[1] = (char*)tcp->u_arg[0];
+
+    // now populate argv[1:] directly from child's original space
+    // (original arguments)
+ 
+    char** child_argv = (char**)tcp->u_arg[1]; // in child's address space
+    char* cur_arg = NULL;
+    int i = 1; // start at argv[1], since we're ignoring argv[0]
+    while (1) {
+      EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, (void*)&cur_arg) < 0);
+      new_argv[i + 1] = cur_arg;
+      if (cur_arg == NULL) {
+        break;
+      }
+      i++;
+    }
+
+    i = 0;
+    cur_arg = NULL;
+    while (1) {
+      cur_arg = new_argv[i];
+      if (cur_arg) {
+        EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
+        //printf("  new_argv[%d] = %s\n", i, path);
+        i++;
+      }
+      // argv is null-terminated
+      else {
+        break;
+      }
+    }
+
+    // now set ebx to the new program name and ecx to the new argv array
+    // to alter the arguments of the execv system call :0
+    struct user_regs_struct cur_regs;
+    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+    cur_regs.ebx = (long)tcp->childshm;            // location of base
+    cur_regs.ecx = ((long)tcp->childshm) + offset; // location of new_argv
+    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
   }
 }
 
@@ -412,7 +503,7 @@ void CDE_begin_file_stat(struct tcb* tcp) {
 
   // redirect stat call to the version of the file within cde-root/ package
   if (CDE_exec_mode) {
-    redirect_filename(tcp);
+    modify_syscall_first_arg(tcp);
   }
 }
 
@@ -468,7 +559,7 @@ void CDE_begin_file_unlink(struct tcb* tcp) {
   tcp->opened_filename = strdup(path);
 
   if (CDE_exec_mode) {
-    redirect_filename(tcp);
+    modify_syscall_first_arg(tcp);
   }
   else {
     // TODO: delete the copy of the file in cde-root/
