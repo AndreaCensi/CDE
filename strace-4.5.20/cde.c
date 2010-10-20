@@ -410,7 +410,10 @@ void CDE_end_file_stat(struct tcb* tcp) {
       // ... if it's actually a directory, then mkdir it
       struct stat st;
       EXITIF(umove(tcp, tcp->u_arg[1], &st) < 0);
-      if (S_ISDIR(st.st_mode)) {
+      // only pick up on absolute paths (starting with '/')
+      // TODO: this is imperfect, since "../other-dir/" is outside of pwd
+      // but is a relative path
+      if (S_ISDIR(st.st_mode) && tcp->opened_filename[0] == '/') {
         // actually create that directory within cde-root/
         // (some code is copied-and-pasted, so refactor later if necessary)
 

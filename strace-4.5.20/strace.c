@@ -95,7 +95,7 @@ extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
 
 
-int debug = 0, followfork = 0;
+int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
 int dtime = 0, xflag = 0, qflag = 0;
 cflag_t cflag = CFLAG_NONE;
 static int iflag = 0, interactive = 0, pflag_seen = 0, rflag = 0, tflag = 0;
