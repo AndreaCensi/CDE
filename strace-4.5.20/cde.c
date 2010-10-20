@@ -360,6 +360,21 @@ void CDE_begin_execve(struct tcb* tcp) {
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
   tcp->opened_filename = strdup(path);
 
+  // remember this is an address in the child's address space:
+  char** child_argv = (char**)tcp->u_arg[1];
+  char* cur_arg = NULL;
+  int i = 0;
+  printf("CDE_begin_execve %s\n", tcp->opened_filename);
+  while (1) {
+    EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, &cur_arg) < 0);
+    if (cur_arg == NULL) {
+      break;
+    }
+    EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
+    printf("  argv[%d] = %s\n", i, path);
+    i++;
+  }
+
   if (CDE_exec_mode) {
     redirect_filename(tcp);
   }
