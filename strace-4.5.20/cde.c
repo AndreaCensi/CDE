@@ -9,6 +9,10 @@ static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename);
 
 
+// make the shared memory page pretty big to accomodate argv arrays
+#define SHARED_PAGE_SIZE (MAXPATHLEN * 5)
+
+
 /* A structure to represent paths. */
 struct namecomp {
   int len;
@@ -745,7 +749,7 @@ void alloc_tcb_CDE_fields(struct tcb* tcp) {
     do {
       errno = 0;
       key = rand();
-      tcp->shmid = shmget(key, MAXPATHLEN * 2, IPC_CREAT|IPC_EXCL|0600);
+      tcp->shmid = shmget(key, SHARED_PAGE_SIZE, IPC_CREAT|IPC_EXCL|0600);
     } while (tcp->shmid == -1 && errno == EEXIST);
 
     tcp->localshm = (char*)shmat(tcp->shmid, NULL, 0);
