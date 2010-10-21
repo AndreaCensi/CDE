@@ -338,12 +338,28 @@ static void copy_file_into_cde_root(char* filename) {
       strcat(path3, "/");
       strcat(path3, orig_symlink_target);
 
-      //printf("  cp %s %s\n", path2, path3);
+      // ok, let's get the absolute path of path3 without any '..' or '.' funniness
+      char* symlink_dst_abspath = realpath_nofollow(path3);
+
+      // ugh, this is getting really really gross, mkdir all dirs stated in
+      // symlink_dst_abspath if they don't yet exist
+      struct path* p = str2path(symlink_dst_abspath);
+      path_pop(p); // ignore basename portion to leave just the dirname
+      int i;
+      for (i = 1; i <= p->depth; i++) {
+        char* dn = path2str(p, i);
+        mkdir(dn, 0777);
+        free(dn);
+      }
+      delete_path(p);
+
+      //printf("  cp %s %s\n", path2, symlink_dst_abspath);
       // copy the target file over to cde-root/
-      if ((link(path2, path3) != 0) && (errno != EEXIST)) {
-        copy_file(path2, path3);
+      if ((link(path2, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
+        copy_file(path2, symlink_dst_abspath);
       }
 
+      free(symlink_dst_abspath);
       free(orig_symlink_target);
       free(filename_copy);
     }
