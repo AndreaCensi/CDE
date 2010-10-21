@@ -32,6 +32,22 @@
 
 #include "defs.h"
 
+// pgbovine
+// pgbovine
+extern void CDE_begin_standard_fileop(struct tcb* tcp, const char* syscall_name);
+extern void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
+                                    char success_type);
+extern void CDE_begin_file_unlink(struct tcb* tcp);
+
+#define CDE_standard_fileop_macro(tcp, success_type) \
+  if (entering(tcp)) { \
+    CDE_begin_standard_fileop(tcp, __FUNCTION__); \
+  } \
+  else { \
+    CDE_end_standard_fileop(tcp, __FUNCTION__, success_type); \
+  }
+
+
 #include <dirent.h>
 
 #ifdef LINUX
@@ -327,14 +343,6 @@ const struct xlat open_mode_flags[] = {
 # define AT_FDCWD                -100
 #endif
 
-// pgbovine
-extern void CDE_begin_file_open(struct tcb* tcp);
-extern void CDE_end_file_open(struct tcb* tcp);
-extern void CDE_begin_file_stat(struct tcb* tcp);
-extern void CDE_end_file_stat(struct tcb* tcp);
-extern void CDE_begin_file_unlink(struct tcb* tcp);
-extern void CDE_begin_file_access(struct tcb* tcp);
-
 
 /* The fd is an "int", so when decoding x86 on x86_64, we need to force sign
  * extension to get the right value.  We do this by declaring fd as int here.
@@ -426,13 +434,8 @@ decode_open(struct tcb *tcp, int offset)
 int
 sys_open(struct tcb *tcp)
 {
-  // modified by pgbovine to track dependencies rather than printing
-  if (entering(tcp)) {
-    CDE_begin_file_open(tcp);
-  }
-  else {
-    CDE_end_file_open(tcp);
-  }
+  // modified by pgbovine
+  CDE_standard_fileop_macro(tcp, 1); // remember success_type = 1 here
   return 0;
 
 	//return decode_open(tcp, 0);
@@ -488,11 +491,17 @@ solaris_open(struct tcb *tcp)
 int
 sys_creat(struct tcb *tcp)
 {
+  // modified by pgbovine
+  CDE_standard_fileop_macro(tcp, 0);
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", %#lo", tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 
 static const struct xlat access_flags[] = {
@@ -523,10 +532,7 @@ decode_access(struct tcb *tcp, int offset)
 int
 sys_access(struct tcb *tcp)
 {
-  // modified by pgbovine
-  if (entering(tcp)) {
-    CDE_begin_file_access(tcp);
-  }
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
   return 0;
 
 	//return decode_access(tcp, 0);
@@ -664,11 +670,16 @@ sys_lseek64(struct tcb *tcp)
 int
 sys_truncate(struct tcb *tcp)
 {
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", %lu", tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 #endif
 
@@ -676,11 +687,16 @@ sys_truncate(struct tcb *tcp)
 int
 sys_truncate64(struct tcb *tcp)
 {
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		printllval(tcp, ", %llu", 1);
 	}
 	return 0;
+  */
 }
 #endif
 
@@ -1239,13 +1255,7 @@ printoldstat(struct tcb *tcp, long addr)
 int
 sys_stat(struct tcb *tcp)
 {
-  // modified by pgbovine to track dependencies rather than printing
-  if (entering(tcp)) {
-    CDE_begin_file_stat(tcp);
-  }
-  else {
-    CDE_end_file_stat(tcp);
-  }
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
   return 0;
 
   /*
@@ -1263,13 +1273,7 @@ sys_stat(struct tcb *tcp)
 int
 sys_stat64(struct tcb *tcp)
 {
-  // modified by pgbovine to track dependencies rather than printing
-  if (entering(tcp)) {
-    CDE_begin_file_stat(tcp);
-  }
-  else {
-    CDE_end_file_stat(tcp);
-  }
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
   return 0;
 
   /*
@@ -1376,13 +1380,7 @@ sys_oldfstat(struct tcb *tcp)
 int
 sys_lstat(struct tcb *tcp)
 {
-  // modified by pgbovine to track dependencies rather than printing
-  if (entering(tcp)) {
-    CDE_begin_file_stat(tcp);
-  }
-  else {
-    CDE_end_file_stat(tcp);
-  }
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
   return 0;
 
   /*
@@ -1400,13 +1398,7 @@ sys_lstat(struct tcb *tcp)
 int
 sys_lstat64(struct tcb *tcp)
 {
-  // modified by pgbovine to track dependencies rather than printing
-  if (entering(tcp)) {
-    CDE_begin_file_stat(tcp);
-  }
-  else {
-    CDE_end_file_stat(tcp);
-  }
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
   return 0;
 
   /*
@@ -1428,13 +1420,7 @@ sys_lstat64(struct tcb *tcp)
 int
 sys_oldlstat(struct tcb *tcp)
 {
-  // modified by pgbovine to track dependencies rather than printing
-  if (entering(tcp)) {
-    CDE_begin_file_stat(tcp);
-  }
-  else {
-    CDE_end_file_stat(tcp);
-  }
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
   return 0;
 
 /*
@@ -1739,6 +1725,10 @@ printstatfs(struct tcb *tcp, long addr)
 int
 sys_statfs(struct tcb *tcp)
 {
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
@@ -1746,6 +1736,7 @@ sys_statfs(struct tcb *tcp)
 		printstatfs(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 
 int
@@ -1793,6 +1784,10 @@ printstatfs64(struct tcb *tcp, long addr)
 int
 sys_statfs64(struct tcb *tcp)
 {
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", %lu, ", tcp->u_arg[1]);
@@ -1803,6 +1798,7 @@ sys_statfs64(struct tcb *tcp)
 			tprintf("{???}");
 	}
 	return 0;
+  */
 }
 
 int
@@ -2077,7 +2073,11 @@ decode_readlink(struct tcb *tcp, int offset)
 int
 sys_readlink(struct tcb *tcp)
 {
-	return decode_readlink(tcp, 0);
+  // pgbovine
+  CDE_standard_fileop_macro(tcp, 1); // remember success_type = 1 here
+  return 0;
+
+	//return decode_readlink(tcp, 0);
 }
 
 #ifdef LINUX
@@ -2119,12 +2119,17 @@ sys_renameat(struct tcb *tcp)
 int
 sys_chown(struct tcb *tcp)
 {
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		printuid(", ", tcp->u_arg[1]);
 		printuid(", ", tcp->u_arg[2]);
 	}
 	return 0;
+  */
 }
 
 #ifdef LINUX
@@ -2167,7 +2172,10 @@ decode_chmod(struct tcb *tcp, int offset)
 int
 sys_chmod(struct tcb *tcp)
 {
-	return decode_chmod(tcp, 0);
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+	//return decode_chmod(tcp, 0);
 }
 
 #ifdef LINUX
@@ -2255,6 +2263,10 @@ sys_utimensat(struct tcb *tcp)
 int
 sys_utime(struct tcb *tcp)
 {
+  CDE_standard_fileop_macro(tcp, 0); // pgbovine
+  return 0;
+
+  /*
 	union {
 		long utl[2];
 		int uti[2];
@@ -2285,6 +2297,7 @@ sys_utime(struct tcb *tcp)
 			abort();
 	}
 	return 0;
+  */
 }
 
 static int

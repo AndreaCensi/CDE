@@ -220,58 +220,60 @@ static void copy_file_into_cde_root(char* filename) {
 
   // by now, filename_stat contains the info for the actual target file,
   // NOT a symlink to it
-  if (S_ISREG(filename_stat.st_mode)) { // regular file
-    // resolve absolute path to get rid of '..', '.', and other weird symbols
-    char* filename_abspath = realpath_nofollow(filename);
 
-    char* dst_path = malloc(strlen(filename_abspath) + strlen("cde-root") + 1);
-    strcpy(dst_path, "cde-root");
-    strcat(dst_path, filename_abspath);
+  // resolve absolute path to get rid of '..', '.', and other weird symbols
+  char* filename_abspath = realpath_nofollow(filename);
+
+  char* dst_path = malloc(strlen(filename_abspath) + strlen("cde-root") + 1);
+  strcpy(dst_path, "cde-root");
+  strcat(dst_path, filename_abspath);
 
 
-    // Record an entry in cde-root/cde.relpaths to map the directory
-    // names of relative path to the appropriate location within cde-root/.
-    //
-    // We need to do this because when we move the package to another
-    // machine, relative paths will be resolved differently, so we need
-    // to consult cde.relpaths to find out where files are located in
-    // the package.
-    if (!IS_ABSPATH(filename)) {
-      char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
-      char* rel_dir = dirname(rel_filename_copy);
+  // Record an entry in cde-root/cde.relpaths to map the directory
+  // names of relative path to the appropriate location within cde-root/.
+  //
+  // We need to do this because when we move the package to another
+  // machine, relative paths will be resolved differently, so we need
+  // to consult cde.relpaths to find out where files are located in
+  // the package.
+  if (!IS_ABSPATH(filename)) {
+    char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
+    char* rel_dir = dirname(rel_filename_copy);
 
-      char* dst_path_copy = strdup(dst_path); // dirname() destroys its arg
-      char* dir_within_package = dirname(dst_path_copy);
+    char* dst_path_copy = strdup(dst_path); // dirname() destroys its arg
+    char* dir_within_package = dirname(dst_path_copy);
 
-      // don't insert duplicates
-      int i;
-      int found = 0;
-      for (i = 0; i < relpath_map_size; i++) {
-        if (strcmp(relpath_map[i].src, rel_dir) == 0) {
-          assert(strcmp(relpath_map[i].tgt, dir_within_package) == 0);
-          found = 1;
-          break;
-        }
+    // don't insert duplicates
+    int i;
+    int found = 0;
+    for (i = 0; i < relpath_map_size; i++) {
+      if (strcmp(relpath_map[i].src, rel_dir) == 0) {
+        assert(strcmp(relpath_map[i].tgt, dir_within_package) == 0);
+        found = 1;
+        break;
       }
-
-      if (!found) {
-        relpath_map[relpath_map_size].src = strdup(rel_dir);
-        relpath_map[relpath_map_size].tgt = strdup(dir_within_package);
-        relpath_map_size++;
-        assert(relpath_map_size < 50); // bound it for simplicity
-
-        FILE* relpath_f = fopen("cde-root/cde.relpaths", "a");
-        assert(relpath_f);
-
-        // colon-delimited to support paths with spaces in them
-        fprintf(relpath_f, "%s:%s\n", rel_dir, dir_within_package);
-        fclose(relpath_f);
-      }
-
-      free(dst_path_copy);
-      free(rel_filename_copy);
     }
 
+    if (!found) {
+      relpath_map[relpath_map_size].src = strdup(rel_dir);
+      relpath_map[relpath_map_size].tgt = strdup(dir_within_package);
+      relpath_map_size++;
+      assert(relpath_map_size < 50); // bound it for simplicity
+
+      FILE* relpath_f = fopen("cde-root/cde.relpaths", "a");
+      assert(relpath_f);
+
+      // colon-delimited to support paths with spaces in them
+      fprintf(relpath_f, "%s:%s\n", rel_dir, dir_within_package);
+      fclose(relpath_f);
+    }
+
+    free(dst_path_copy);
+    free(rel_filename_copy);
+  }
+
+
+  if (S_ISREG(filename_stat.st_mode)) { // regular file
 
     // lazy optimization to avoid redundant copies ...
     struct stat dst_path_stat;
@@ -280,9 +282,7 @@ static void copy_file_into_cde_root(char* filename) {
       // filename, then don't do anything!
       if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
         //printf("PUNTED on %s\n", dst_path);
-        free(dst_path);
-        free(filename_abspath);
-        return;
+        goto done;
       }
     }
 
@@ -367,97 +367,26 @@ static void copy_file_into_cde_root(char* filename) {
     find_and_copy_possible_dynload_libs(filename);
 
     delete_path(p);
-    free(dst_path);
-    free(filename_abspath);
   }
   else if (S_ISDIR(filename_stat.st_mode)) { // directory
     // do a "mkdir -p filename" after redirecting it into cde-root/
-  }
-}
+    struct path* p = str2path(dst_path);
 
-
-#ifdef DEPRECATED
-static void copy_file_into_package_DEPRECATED(char* filename) {
-  assert(filename);
-
-  // don't copy filename that we're ignoring
-  if (ignore_path(filename)) {
-    return;
-  }
-
-  // this will NOT follow the symlink ...
-  struct stat filename_stat;
-  EXITIF(lstat(filename, &filename_stat));
-  char is_symlink = S_ISLNK(filename_stat.st_mode);
-
-  if (is_symlink) {
-    // this will follow the symlink ...
-    EXITIF(stat(filename, &filename_stat));
-  }
-
-  // check whether it's a REGULAR-ASS file
-  if (S_ISREG(filename_stat.st_mode)) {
-    // assume that relative paths are in working directory,
-    // so no need to grab those files
-    //
-    // TODO: this isn't a perfect assumption since a
-    // relative path could be something like '../data.txt',
-    // which this won't pick up :)
-    if (filename[0] == '/') {
-      // modify filename so that it appears as a RELATIVE PATH
-      // within a cde-root/ sub-directory
-      char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-      strcpy(dst_path, "cde-root");
-      strcat(dst_path, filename);
-
-      // lazy optimization to avoid redundant copies ...
-      struct stat dst_path_stat;
-      if (lstat(dst_path, &dst_path_stat) == 0) {
-        // if the destination file exists and is newer than the original
-        // filename, then don't do anything!
-        if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
-          //printf("PUNTED on %s\n", dst_path);
-          free(dst_path);
-          return;
-        }
-      }
-
-      struct path* p = str2path(dst_path);
-      path_pop(p); // ignore filename portion to leave just the dirname
-
-      // now mkdir all directories specified in dst_path
-      int i;
-      for (i = 1; i <= p->depth; i++) {
-        char* dn = path2str(p, i);
-        mkdir(dn, 0777);
-        free(dn);
-      }
-
-      // finally, 'copy' filename over to dst_path
-      // 1.) try a hard link for efficiency
-      // 2.) if that fails, then do a straight-up copy
-      //
-      // don't hard link symlinks since they're simply textual
-      // references to the real files; just straight-up copy them
-      //
-      // EEXIST means the file already exists, which isn't
-      // really a hard link failure ...
-      if (is_symlink || (link(filename, dst_path) && (errno != EEXIST))) {
-        copy_file(filename, dst_path);
-      }
-
-      // if it's a shared library, then heuristically try to grep
-      // through it to find whether it might dynamically load any other
-      // libraries (e.g., those for other CPU types that we can't pick
-      // up via strace)
-      find_and_copy_possible_dynload_libs(filename);
-
-      delete_path(p);
-      free(dst_path);
+    // now mkdir all directories specified in dst_path
+    int i;
+    for (i = 1; i <= p->depth; i++) {
+      char* dn = path2str(p, i);
+      mkdir(dn, 0777);
+      free(dn);
     }
+
+    delete_path(p);
   }
+
+done:
+  free(dst_path);
+  free(filename_abspath);
 }
-#endif
 
 
 #define STRING_ISGRAPHIC(c) ( ((c) == '\t' || (isascii (c) && isprint (c))) )
@@ -723,7 +652,7 @@ void CDE_begin_standard_fileop(struct tcb* tcp, const char* syscall_name) {
 /* depending on value of success_type, do a different check for success
 
    success_type = 0 - zero return value is a success (e.g., for stat)
-   success_type = 1 - non-negative return value is a success (e.g., for open)
+   success_type = 1 - non-negative return value is a success (e.g., for open or readlink)
 
  */
 void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
@@ -736,53 +665,6 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
   else {
     if (((success_type == 0) && (tcp->u_rval == 0)) ||
         ((success_type == 1) && (tcp->u_rval >= 0))) {
-      copy_file_into_cde_root(tcp->opened_filename);
-    }
-  }
-
-  free(tcp->opened_filename);
-  tcp->opened_filename = NULL;
-}
-
-
-
-
-void CDE_begin_file_open(struct tcb* tcp) {
-  // STINT
-  CDE_begin_standard_fileop(tcp, "open");
-  return;
-
-  assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
-
-  // TODO: should we only track files opened in read-only or read-write
-  // modes?  right now, we track files opened in ANY mode
-  //
-  // relevant code snippets:
-  //   char open_mode = (tcp->u_arg[1] & 0x3);
-  //   if (open_mode == O_RDONLY || open_mode == O_RDWR) { ... }
-
-  if (CDE_exec_mode) {
-    //printf("CDE_begin_file_open %s\n", tcp->opened_filename);
-    modify_syscall_first_arg(tcp);
-  }
-}
-
-void CDE_end_file_open(struct tcb* tcp) {
-  // STINT
-  CDE_end_standard_fileop(tcp, "open", 1);
-  return;
-
-  assert(tcp->opened_filename);
- 
-  if (CDE_exec_mode) {
-    // empty
-  }
-  else {
-    // non-negative return value means that the call returned
-    // successfully with a known file descriptor
-    if (tcp->u_rval >= 0) {
       copy_file_into_cde_root(tcp->opened_filename);
     }
   }
@@ -806,7 +688,7 @@ void CDE_begin_execve(struct tcb* tcp) {
 
     //printf("%s CDE_begin_execve\n", tcp->opened_filename);
     // TODO: copy-and-paste alert
-    if (tcp->opened_filename[0] == '/') {
+    if (IS_ABSPATH(tcp->opened_filename)) {
       // for an absolute path, check the version within cde-root/
       char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
       strcpy(dst_path, "cde-root");
@@ -938,18 +820,6 @@ void CDE_end_execve(struct tcb* tcp) {
 }
 
 
-void CDE_begin_file_stat(struct tcb* tcp) {
-  assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
-
-  // redirect stat call to the version of the file within cde-root/ package
-  if (CDE_exec_mode) {
-    //printf("CDE_begin_file_stat %s\n", tcp->opened_filename);
-    modify_syscall_first_arg(tcp);
-  }
-}
-
 void CDE_end_file_stat(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
@@ -1018,21 +888,6 @@ void CDE_begin_file_unlink(struct tcb* tcp) {
 
       free(dst_path);
     }
-  }
-
-  // no need for this anymore
-  free(tcp->opened_filename);
-  tcp->opened_filename = NULL;
-}
-
-void CDE_begin_file_access(struct tcb* tcp) {
-  assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
-
-  if (CDE_exec_mode) {
-    //printf("CDE_begin_file_access %s\n", tcp->opened_filename);
-    modify_syscall_first_arg(tcp);
   }
 
   // no need for this anymore
