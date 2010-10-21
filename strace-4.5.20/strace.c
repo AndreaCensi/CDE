@@ -576,6 +576,7 @@ startup_child (char **argv)
         char is_path = 0;
         char is_user = 0;
         char is_home = 0;
+        char is_pwd  = 0;
 
         for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
           // find PATH environment variable
@@ -591,8 +592,12 @@ startup_child (char **argv)
             is_home = 1;
             continue;
           }
+          else if (strcmp(p, "PWD") == 0) {
+            is_pwd = 1;
+            continue;
+          }
 
-          if (is_path || is_user || is_home) {
+          if (is_path || is_user || is_home || is_pwd) {
             stripped_str = strdup(p);
             if (stripped_str[strlen(stripped_str) - 1] == '\n') {
               stripped_str[strlen(stripped_str) - 1] = '\0';
@@ -604,8 +609,11 @@ startup_child (char **argv)
             else if (is_user) {
               setenv("USER", stripped_str, 1);
             }
-            else {
+            else if (is_home) {
               setenv("HOME", stripped_str, 1);
+            }
+            else if (is_pwd) {
+              setenv("PWD", stripped_str, 1);
             }
 
             free(stripped_str);

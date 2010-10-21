@@ -57,6 +57,56 @@ static int ignore_path(char* filename) {
   return 0;
 }
 
+// gets the absolute path of filename, WITHOUT following any symlinks
+// mallocs a new string
+static char* realpath_nofollow(char* filename) {
+  char* bn = basename(filename); // doesn't destroy its arg
+
+  char* filename_copy = strdup(filename); // dirname() destroys its arg
+  char* dir = dirname(filename_copy);
+  path[0] = '\0';
+  realpath(dir, path);
+  assert(path[0] != '\0');
+
+  char* ret = malloc(strlen(filename) + strlen(path) + 1 + 1);
+  strcpy(ret, path);
+  strcat(ret, "/");
+  strcat(ret, bn);
+
+  free(filename_copy);
+  return ret;
+}
+
+
+// return 1 iff the absolute path of filename is within pwd
+static int file_is_within_pwd(char* filename) {
+  // TODO: if we're running on another machine, make sure that this
+  // properly grabs the value of $PWD from cde-root/cde.environment
+  char* pwd = getenv("PWD");
+
+  path[0] = '\0';
+  realpath(filename, path);
+  assert(path[0] != '\0');
+
+  // just do a string comparison
+  char* dn = dirname(path); // destroys path
+
+  int dn_len = strlen(dn);
+  int pwd_len = strlen(pwd);
+
+  if (pwd_len <= dn_len) {
+    if (strncmp(dn, pwd, pwd_len) == 0) {
+      //printf("file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
+      return 1;
+    }
+    else {
+      return 0;
+    }
+  }
+
+  return 0;
+}
+
 
 // cp $src_filename $dst_filename
 // note that this WILL follow symlinks
@@ -90,6 +140,12 @@ static void copy_file_into_cde_root(char* filename) {
     return;
   }
 
+  // don't do anything for files inside of pwd :)
+  if (file_is_within_pwd(filename)) {
+    return;
+  }
+
+
   // this will NOT follow the symlink ...
   struct stat filename_stat;
   EXITIF(lstat(filename, &filename_stat));
@@ -100,113 +156,119 @@ static void copy_file_into_cde_root(char* filename) {
     EXITIF(stat(filename, &filename_stat));
   }
 
+
   // by now, filename_stat contains the info for the actual target file,
   // NOT a symlink
-
   if (S_ISREG(filename_stat.st_mode)) { // regular file
-    // assume that relative paths are in working directory,
-    // so no need to grab those files
-    //
-    // TODO: this isn't a perfect assumption since a
-    // relative path could be something like '../data.txt',
-    // which this won't pick up :)
-    if (filename[0] == '/') {
-      // modify filename so that it appears as a RELATIVE PATH
-      // within a cde-root/ sub-directory
-      char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-      strcpy(dst_path, "cde-root");
-      strcat(dst_path, filename);
+    // resolve absolute path to get rid of '..', '.', and other weird symbols
+    char* filename_abspath = realpath_nofollow(filename);
 
-      // lazy optimization to avoid redundant copies ...
-      struct stat dst_path_stat;
-      if (stat(dst_path, &dst_path_stat) == 0) {
-        // if the destination file exists and is newer than the original
-        // filename, then don't do anything!
-        if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
-          //printf("PUNTED on %s\n", dst_path);
-          free(dst_path);
-          return;
-        }
+    char* dst_path = malloc(strlen(filename_abspath) + strlen("cde-root") + 1);
+    strcpy(dst_path, "cde-root");
+    strcat(dst_path, filename_abspath);
+
+    //char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+    //strcpy(dst_path, "cde-root");
+    //strcat(dst_path, filename);
+
+    // lazy optimization to avoid redundant copies ...
+    struct stat dst_path_stat;
+    if (stat(dst_path, &dst_path_stat) == 0) {
+      // if the destination file exists and is newer than the original
+      // filename, then don't do anything!
+      if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
+        //printf("PUNTED on %s\n", dst_path);
+        free(dst_path);
+        return;
       }
-
-      struct path* p = str2path(dst_path);
-      path_pop(p); // ignore filename portion to leave just the dirname
-
-      // now mkdir all directories specified in dst_path
-      int i;
-      for (i = 1; i <= p->depth; i++) {
-        char* dn = path2str(p, i);
-        mkdir(dn, 0777);
-        free(dn);
-      }
-
-      // finally, 'copy' filename over to dst_path
-
-
-      // if it's a symlink, copy both it and its target
-      if (is_symlink) {
-        // target file must exist, so let's resolve its name
-        int len = readlink(filename, path, sizeof path);
-
-        char* filename_copy = strdup(filename); // dirname() destroys its arg
-        char* dir = dirname(filename_copy);
-        assert(dir[0] == '/');
-
-        EXITIF(len < 0);
-        path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
-
-        // a bit confusing since we want to avoid mallocs ;)
-
-        // use path2 as a temporary holding spot for source path:
-        strcpy(path2, dir);
-        strcat(path2, "/");
-        strcat(path2, path);
-
-        // use path3 as a temporary holding spot
-        strcpy(path3, "cde-root");
-        strcat(path3, filename);
-
-        // create a new identical symlink in cde-root/
-        EXITIF(symlink(path, path3) < 0);
-
-        // use path3 as a temporary holding spot (again!)
-        strcpy(path3, "cde-root");
-        strcat(path3, dir);
-        strcat(path3, "/");
-        strcat(path3, path);
-
-        // copy the target file over to cde-root/
-        if ((link(path2, path3) != 0) && (errno != EEXIST)) {
-          copy_file(path2, path3);
-        }
-
-        free(filename_copy);
-      }
-      else {
-        // 1.) try a hard link for efficiency
-        // 2.) if that fails, then do a straight-up copy,
-        //     but do NOT follow symlinks
-        //
-        // EEXIST means the file already exists, which isn't
-        // really a hard link failure ...
-        if ((link(filename, dst_path) != 0) && (errno != EEXIST)) {
-          copy_file(filename, dst_path);
-        }
-      }
-
-
-      // if it's a shared library, then heuristically try to grep
-      // through it to find whether it might dynamically load any other
-      // libraries (e.g., those for other CPU types that we can't pick
-      // up via strace)
-      find_and_copy_possible_dynload_libs(filename);
-
-      delete_path(p);
-      free(dst_path);
     }
+
+    struct path* p = str2path(dst_path);
+    path_pop(p); // ignore filename portion to leave just the dirname
+
+    // now mkdir all directories specified in dst_path
+    int i;
+    for (i = 1; i <= p->depth; i++) {
+      char* dn = path2str(p, i);
+      mkdir(dn, 0777);
+      free(dn);
+    }
+
+    // finally, 'copy' filename over to dst_path
+
+    // if it's a symlink, copy both it and its target
+    if (is_symlink) {
+      // target file must exist, so let's resolve its name
+      int len = readlink(filename, path, sizeof path);
+      EXITIF(len < 0);
+      path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
+
+      char* orig_symlink_target = strdup(path);
+
+      char* filename_copy = strdup(filename); // dirname() destroys its arg
+      char* dir = dirname(filename_copy);
+
+      // resolve the realpath() of dir
+      path[0] = '\0';
+      realpath(dir, path);
+      assert(path[0] != '\0');
+
+      // now path is the realpath() of dir
+      assert(path[0] == '/');
+
+      // user path2 as a temporary holding spot
+      strcpy(path2, path);
+      strcat(path2, "/");
+      strcat(path2, orig_symlink_target);
+
+      // use path3 as a temporary holding spot
+      strcpy(path3, "cde-root");
+      strcat(path3, filename_abspath);
+
+      // create a new identical symlink in cde-root/
+      printf("symlink(%s, %s)\n", orig_symlink_target, path3);
+      EXITIF(symlink(orig_symlink_target, path3) < 0);
+
+      // use path3 as a temporary holding spot (again!)
+      strcpy(path3, "cde-root");
+      strcat(path3, path);
+      strcat(path3, "/");
+      strcat(path3, orig_symlink_target);
+
+      printf("  cp %s %s\n", path2, path3);
+      // copy the target file over to cde-root/
+      if ((link(path2, path3) != 0) && (errno != EEXIST)) {
+        copy_file(path2, path3);
+      }
+
+      free(orig_symlink_target);
+      free(filename_copy);
+    }
+    else { // regular file, simple common case :)
+      // 1.) try a hard link for efficiency
+      // 2.) if that fails, then do a straight-up copy,
+      //     but do NOT follow symlinks
+      //
+      // EEXIST means the file already exists, which isn't
+      // really a hard link failure ...
+      if ((link(filename, dst_path) != 0) && (errno != EEXIST)) {
+        copy_file(filename, dst_path);
+      }
+    }
+
+
+    // if it's a shared library, then heuristically try to grep
+    // through it to find whether it might dynamically load any other
+    // libraries (e.g., those for other CPU types that we can't pick
+    // up via strace)
+    find_and_copy_possible_dynload_libs(filename);
+
+    delete_path(p);
+    free(dst_path);
+    free(filename_abspath);
   }
   else if (S_ISDIR(filename_stat.st_mode)) { // directory
-    // TODO: "mkdir -p filename"
+    // do a "mkdir -p filename" after redirecting it into cde-root/
   }
 }
 
