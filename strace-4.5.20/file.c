@@ -333,6 +333,7 @@ extern void CDE_end_file_open(struct tcb* tcp);
 extern void CDE_begin_file_stat(struct tcb* tcp);
 extern void CDE_end_file_stat(struct tcb* tcp);
 extern void CDE_begin_file_unlink(struct tcb* tcp);
+extern void CDE_begin_file_access(struct tcb* tcp);
 
 
 /* The fd is an "int", so when decoding x86 on x86_64, we need to force sign
@@ -522,7 +523,13 @@ decode_access(struct tcb *tcp, int offset)
 int
 sys_access(struct tcb *tcp)
 {
-	return decode_access(tcp, 0);
+  // modified by pgbovine
+  if (entering(tcp)) {
+    CDE_begin_file_access(tcp);
+  }
+  return 0;
+
+	//return decode_access(tcp, 0);
 }
 
 #ifdef LINUX
@@ -1421,6 +1428,16 @@ sys_lstat64(struct tcb *tcp)
 int
 sys_oldlstat(struct tcb *tcp)
 {
+  // modified by pgbovine to track dependencies rather than printing
+  if (entering(tcp)) {
+    CDE_begin_file_stat(tcp);
+  }
+  else {
+    CDE_end_file_stat(tcp);
+  }
+  return 0;
+
+/*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
@@ -1428,6 +1445,7 @@ sys_oldlstat(struct tcb *tcp)
 		printoldstat(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 #endif /* LINUX && HAVE_STRUCT___OLD_KERNEL_STAT */
 

@@ -786,6 +786,7 @@ startup_child (char **argv)
     // pgbovine - subtle ... even though we look for the existence of
     // path_to_search, we still want to execute pathname, since our
     // CDE_begin_execve handler expects an original pristine pathname :)
+    //printf("execv %s (path_to_search %s)\n", pathname, path_to_search);
 		execv(pathname, argv);
 		perror("strace: exec");
 		_exit(1);
@@ -876,7 +877,7 @@ main(int argc, char *argv[])
 
   // pgbovine - only track selected system calls
   // qualify actually mutates this string, so we can't pass in a constant
-  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64,unlink");
+  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64,unlink,access");
 	qualify(tmp);
   free(tmp);
 

@@ -297,7 +297,7 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
     return;
   }
 
-  //printf("attempt %s\n", tcp->opened_filename);
+  //printf("  attempt %s %d\n", tcp->opened_filename, tcp->pid);
 
   if (!tcp->childshm) {
     begin_setup_shmat(tcp);
@@ -369,6 +369,7 @@ void CDE_begin_file_open(struct tcb* tcp) {
   //   if (open_mode == O_RDONLY || open_mode == O_RDWR) { ... }
 
   if (CDE_exec_mode) {
+    //printf("CDE_begin_file_open %s\n", tcp->opened_filename);
     modify_syscall_first_arg(tcp);
   }
 }
@@ -399,6 +400,37 @@ void CDE_begin_execve(struct tcb* tcp) {
 
   if (CDE_exec_mode) {
 
+    // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
+    // is a valid executable file WITHIN cde-root/ ... otherwise don't do
+    // anything and simply let the execve fail just like it's supposed to
+    struct stat filename_stat;
+
+    //printf("%s CDE_begin_execve\n", tcp->opened_filename);
+    // TODO: copy-and-paste alert
+    if (tcp->opened_filename[0] == '/') {
+      // for an absolute path, check the version within cde-root/
+      char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+      strcpy(dst_path, "cde-root");
+      strcat(dst_path, tcp->opened_filename);
+
+      if (stat(dst_path, &filename_stat) != 0) {
+        free(dst_path);
+        return;
+      }
+
+      // TODO: we don't check whether it's a real executable file :/
+      free(dst_path);
+    }
+    else {
+      // just check the file itself
+      if (stat(tcp->opened_filename, &filename_stat) != 0) {
+        return;
+      }
+      // TODO: we don't check whether it's a real executable file :/
+    }
+    //printf("%s survived\n", tcp->opened_filename);
+
+
     // set up shared memory segment if we haven't done so yet
     if (!tcp->childshm) {
       begin_setup_shmat(tcp);
@@ -409,7 +441,6 @@ void CDE_begin_execve(struct tcb* tcp) {
 
       return; // MUST punt early here!!!
     }
-
 
     /* we're gonna do some craziness here to redirect the OS to call
        cde-root/ld-linux.so.2 rather than the real program, since
@@ -515,6 +546,7 @@ void CDE_begin_file_stat(struct tcb* tcp) {
 
   // redirect stat call to the version of the file within cde-root/ package
   if (CDE_exec_mode) {
+    //printf("CDE_begin_file_stat %s\n", tcp->opened_filename);
     modify_syscall_first_arg(tcp);
   }
 }
@@ -571,6 +603,7 @@ void CDE_begin_file_unlink(struct tcb* tcp) {
   tcp->opened_filename = strdup(path);
 
   if (CDE_exec_mode) {
+    //printf("CDE_begin_file_unlink %s\n", tcp->opened_filename);
     modify_syscall_first_arg(tcp);
   }
   else {
@@ -586,6 +619,21 @@ void CDE_begin_file_unlink(struct tcb* tcp) {
 
       free(dst_path);
     }
+  }
+
+  // no need for this anymore
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+void CDE_begin_file_access(struct tcb* tcp) {
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
+
+  if (CDE_exec_mode) {
+    //printf("CDE_begin_file_access %s\n", tcp->opened_filename);
+    modify_syscall_first_arg(tcp);
   }
 
   // no need for this anymore
