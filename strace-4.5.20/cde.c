@@ -128,30 +128,42 @@ static char* realpath_nofollow(char* filename) {
 
 // return 1 iff the absolute path of filename is within pwd
 static int file_is_within_pwd(char* filename) {
-  // TODO: if we're running on another machine, make sure that this
-  // properly grabs the value of $PWD from cde-root/cde.environment
-  char* pwd = getenv("PWD");
 
-  // TODO: shoot, realpath doesn't do the right thing on another machine :(
-  path[0] = '\0';
-  realpath(filename, path);
-  assert(path[0] != '\0');
+  if (IS_ABSPATH(filename)) {
+    // If we're running on another machine, make sure that this
+    // properly grabs the value of $PWD from cde-root/cde.environment
+    char* pwd = getenv("PWD");
 
-  // just do a string comparison
-  char* dn = dirname(path); // destroys path
+    // just do a substring comparison
+    char* filename_copy = strdup(filename);
+    char* dn = dirname(filename_copy);
 
-  int dn_len = strlen(dn);
-  int pwd_len = strlen(pwd);
+    int dn_len = strlen(dn);
+    int pwd_len = strlen(pwd);
 
-  if (pwd_len <= dn_len) {
-    if (strncmp(dn, pwd, pwd_len) == 0) {
-      return 1;
+    char is_within_pwd = 0;
+
+    if ((pwd_len <= dn_len) && strncmp(dn, pwd, pwd_len) == 0) {
+      is_within_pwd = 1;
+    }
+
+    free(filename_copy);
+    return is_within_pwd;
+  }
+  else {
+    // if you're given a relative path, then a super-simple check is if
+    // it starts with '..' (or a bunch of '.' followed by a '..')
+    // TODO: this probably doesn't handle all cases; after all, we're
+    // not going for security here :)
+    if (strncmp(filename, "..", 2) == 0) {
+      return 0;
     }
     else {
-      return 0;
+      return 1;
     }
   }
 
+  assert(0); // shouldn't reach here
   return 0;
 }
 
@@ -627,8 +639,7 @@ static char* redirect_filename(char* filename) {
   }
 
   if (!file_is_within_pwd(filename)) {
-
-    if (filename[0] == '/') {
+    if (IS_ABSPATH(filename)) {
       // easy case: absolute path, just do a plain redirect :)
       char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
       strcpy(dst_path, "cde-root");
