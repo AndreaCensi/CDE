@@ -643,6 +643,10 @@ startup_child (char **argv)
 
       fputs("HOME=", envF);
       fputs(getenv("HOME"), envF);
+      fputs("\n", envF);
+
+      fputs("PWD=", envF);
+      fputs(getenv("PWD"), envF);
 
       fclose(envF);
     }

@@ -84,6 +84,7 @@ static int file_is_within_pwd(char* filename) {
   // properly grabs the value of $PWD from cde-root/cde.environment
   char* pwd = getenv("PWD");
 
+  // TODO: shoot, realpath doesn't do the right thing on another machine :(
   path[0] = '\0';
   realpath(filename, path);
   assert(path[0] != '\0');
@@ -96,14 +97,16 @@ static int file_is_within_pwd(char* filename) {
 
   if (pwd_len <= dn_len) {
     if (strncmp(dn, pwd, pwd_len) == 0) {
-      //printf("file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
+      printf("file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
       return 1;
     }
     else {
+      printf("!file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
       return 0;
     }
   }
 
+  printf("!file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
   return 0;
 }
 
@@ -273,7 +276,7 @@ static void copy_file_into_cde_root(char* filename) {
 }
 
 
-static void copy_file_into_package(char* filename) {
+static void copy_file_into_package_DEPRECATED(char* filename) {
   assert(filename);
 
   // don't copy filename that we're ignoring
@@ -460,7 +463,7 @@ done:
       struct stat st;
       if (stat(lib_fullpath, &st) == 0) {
         //printf("%s %s\n", filename, lib_fullpath);
-        copy_file_into_package(lib_fullpath);
+        copy_file_into_cde_root(lib_fullpath);
       }
     }
 
@@ -533,17 +536,36 @@ static char* redirect_filename(char* filename) {
     return NULL;
   }
 
-  // redirect all requests for absolute paths to version within cde-root/
-  // if those files exist!
-  // TODO: make this more accurate since it currently doesn't handle cases
-  // like '../../hello.txt'
-  if (filename[0] == '/') {
-    // modify filename so that it appears as a RELATIVE PATH
-    // within a cde-root/ sub-directory
-    char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-    strcpy(dst_path, "cde-root");
-    strcat(dst_path, filename);
-    return dst_path;
+  if (!file_is_within_pwd(filename)) {
+
+    if (filename[0] == '/') {
+      // easy case: absolute path
+      char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+      strcpy(dst_path, "cde-root");
+      strcat(dst_path, filename);
+      return dst_path;
+    }
+    else {
+      // oh man, it's gonna be hard to handle the "../hello.txt" case
+      // since we don't know what '..' means on this machine.  here's how
+      // we're gonna try to do it, though: get pwd, which should be loaded
+      // from cde.environment if possible.  now look up pwd and try to
+      // tack on filename to it and use realpath to resolve properly
+      char* pwd = getenv("PWD");
+      strcpy(path, pwd);
+      strcat(path, "/");
+      strcat(path, filename);
+
+      char* filename_abspath = realpath_nofollow(path);
+
+      char* dst_path = malloc(strlen(filename_abspath) + strlen("cde-root") + 1);
+      strcpy(dst_path, "cde-root");
+      strcat(dst_path, filename_abspath);
+      printf("--- %s | %s | %s | %s\n", filename, path, filename_abspath, dst_path);
+
+      free(filename_abspath);
+      return dst_path;
+    }
   }
 
   return NULL;
@@ -652,7 +674,7 @@ void CDE_end_file_open(struct tcb* tcp) {
     // non-negative return value means that the call returned
     // successfully with a known file descriptor
     if (tcp->u_rval >= 0) {
-      copy_file_into_package(tcp->opened_filename);
+      copy_file_into_cde_root(tcp->opened_filename);
     }
   }
 
@@ -798,7 +820,7 @@ void CDE_end_execve(struct tcb* tcp) {
   else {
     // return value of 0 means a successful call
     if (tcp->u_rval == 0) {
-      copy_file_into_package(tcp->opened_filename);
+      copy_file_into_cde_root(tcp->opened_filename);
     }
   }
 
