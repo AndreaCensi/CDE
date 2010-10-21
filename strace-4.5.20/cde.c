@@ -32,8 +32,10 @@ void path_pop(struct path* p);
 
 static char* redirect_filename(char* filename);
 
-// used as a temporary holding space for paths copied from child process
-static char path[MAXPATHLEN + 1]; 
+// used as temporary holding spaces for paths, to avoid mallocs
+static char path[MAXPATHLEN + 1];
+static char path2[MAXPATHLEN + 1];
+static char path3[MAXPATHLEN + 1];
 
 // to shut up gcc warnings
 extern char* basename(const char *fname);
@@ -57,6 +59,7 @@ static int ignore_path(char* filename) {
 
 
 // cp $src_filename $dst_filename
+// note that this WILL follow symlinks
 void copy_file(char* src_filename, char* dst_filename) {
   int inF;
   int outF;
@@ -76,6 +79,135 @@ void copy_file(char* src_filename, char* dst_filename) {
     
   close(inF);
   close(outF);
+}
+
+// if filename is a symlink, then copy both it AND its target into cde-root
+static void copy_file_into_cde_root(char* filename) {
+  assert(filename);
+
+  // don't copy filename that we're ignoring
+  if (ignore_path(filename)) {
+    return;
+  }
+
+  // this will NOT follow the symlink ...
+  struct stat filename_stat;
+  EXITIF(lstat(filename, &filename_stat));
+  char is_symlink = S_ISLNK(filename_stat.st_mode);
+
+  if (is_symlink) {
+    // this will follow the symlink ...
+    EXITIF(stat(filename, &filename_stat));
+  }
+
+  // by now, filename_stat contains the info for the actual target file,
+  // NOT a symlink
+
+  if (S_ISREG(filename_stat.st_mode)) { // regular file
+    // assume that relative paths are in working directory,
+    // so no need to grab those files
+    //
+    // TODO: this isn't a perfect assumption since a
+    // relative path could be something like '../data.txt',
+    // which this won't pick up :)
+    if (filename[0] == '/') {
+      // modify filename so that it appears as a RELATIVE PATH
+      // within a cde-root/ sub-directory
+      char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
+      strcpy(dst_path, "cde-root");
+      strcat(dst_path, filename);
+
+      // lazy optimization to avoid redundant copies ...
+      struct stat dst_path_stat;
+      if (stat(dst_path, &dst_path_stat) == 0) {
+        // if the destination file exists and is newer than the original
+        // filename, then don't do anything!
+        if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
+          //printf("PUNTED on %s\n", dst_path);
+          free(dst_path);
+          return;
+        }
+      }
+
+      struct path* p = str2path(dst_path);
+      path_pop(p); // ignore filename portion to leave just the dirname
+
+      // now mkdir all directories specified in dst_path
+      int i;
+      for (i = 1; i <= p->depth; i++) {
+        char* dn = path2str(p, i);
+        mkdir(dn, 0777);
+        free(dn);
+      }
+
+      // finally, 'copy' filename over to dst_path
+
+
+      // if it's a symlink, copy both it and its target
+      if (is_symlink) {
+        // target file must exist, so let's resolve its name
+        int len = readlink(filename, path, sizeof path);
+
+        char* filename_copy = strdup(filename); // dirname() destroys its arg
+        char* dir = dirname(filename_copy);
+        assert(dir[0] == '/');
+
+        EXITIF(len < 0);
+        path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
+
+        // a bit confusing since we want to avoid mallocs ;)
+
+        // use path2 as a temporary holding spot for source path:
+        strcpy(path2, dir);
+        strcat(path2, "/");
+        strcat(path2, path);
+
+        // use path3 as a temporary holding spot
+        strcpy(path3, "cde-root");
+        strcat(path3, filename);
+
+        // create a new identical symlink in cde-root/
+        EXITIF(symlink(path, path3) < 0);
+
+        // use path3 as a temporary holding spot (again!)
+        strcpy(path3, "cde-root");
+        strcat(path3, dir);
+        strcat(path3, "/");
+        strcat(path3, path);
+
+        // copy the target file over to cde-root/
+        if ((link(path2, path3) != 0) && (errno != EEXIST)) {
+          copy_file(path2, path3);
+        }
+
+        free(filename_copy);
+      }
+      else {
+        // 1.) try a hard link for efficiency
+        // 2.) if that fails, then do a straight-up copy,
+        //     but do NOT follow symlinks
+        //
+        // EEXIST means the file already exists, which isn't
+        // really a hard link failure ...
+        if ((link(filename, dst_path) != 0) && (errno != EEXIST)) {
+          copy_file(filename, dst_path);
+        }
+      }
+
+
+      // if it's a shared library, then heuristically try to grep
+      // through it to find whether it might dynamically load any other
+      // libraries (e.g., those for other CPU types that we can't pick
+      // up via strace)
+      find_and_copy_possible_dynload_libs(filename);
+
+      delete_path(p);
+      free(dst_path);
+    }
+  }
+  else if (S_ISDIR(filename_stat.st_mode)) { // directory
+    // TODO: "mkdir -p filename"
+  }
 }
 
 
@@ -355,8 +487,78 @@ static char* redirect_filename(char* filename) {
   return NULL;
 }
 
+/* standard functionality for syscalls that take a filename as first argument
+
+  trace mode:
+    - ONLY on success, if abspath(filename) is outside pwd, then copy it
+      into cde-root/
+      - also, if filename is a symlink, then copy the target into the
+        proper location (maybe using readlink?)
+
+  exec mode:
+    - if abspath(filename) is outside pwd, then redirect it into cde-root/
+
+sys_open(filename, flags, mode)
+sys_creat(filename, mode)
+sys_chmod(filename, ...)
+sys_chown(filename, ...)
+sys_chown16(filename, ...)
+sys_lchown(filename, ...)
+sys_lchown16(filename, ...)
+sys_stat(filename, ...)
+sys_stat64(filename, ...)
+sys_lstat(filename, ...)
+sys_lstat64(filename, ...)
+sys_truncate(path, length)
+sys_truncate64(path, length)
+sys_access(filename, mode)
+sys_utime(filename, ...)
+sys_readlink(path, ...)
+
+ */
+void CDE_begin_standard_fileop(struct tcb* tcp, const char* syscall_name) {
+  assert(!tcp->opened_filename);
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  tcp->opened_filename = strdup(path);
+
+  if (CDE_exec_mode) {
+    //printf("begin %s %s\n", syscall_name, tcp->opened_filename);
+    modify_syscall_first_arg(tcp);
+  }
+}
+
+/* depending on value of success_type, do a different check for success
+
+   success_type = 0 - zero return value is a success (e.g., for stat)
+   success_type = 1 - non-negative return value is a success (e.g., for open)
+
+ */
+void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
+                             char success_type) {
+  assert(tcp->opened_filename);
+ 
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (((success_type == 0) && (tcp->u_rval == 0)) ||
+        ((success_type == 1) && (tcp->u_rval >= 0))) {
+      copy_file_into_cde_root(tcp->opened_filename);
+    }
+  }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+
+
 
 void CDE_begin_file_open(struct tcb* tcp) {
+  // STINT
+  CDE_begin_standard_fileop(tcp, "open");
+  return;
+
   assert(!tcp->opened_filename);
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
   tcp->opened_filename = strdup(path);
@@ -375,6 +577,10 @@ void CDE_begin_file_open(struct tcb* tcp) {
 }
 
 void CDE_end_file_open(struct tcb* tcp) {
+  // STINT
+  CDE_end_standard_fileop(tcp, "open", 1);
+  return;
+
   assert(tcp->opened_filename);
  
   if (CDE_exec_mode) {
