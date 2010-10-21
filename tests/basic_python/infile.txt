@@ -1,0 +1,6 @@
+infile
+---
+hello
+world
+goodbye
+test123

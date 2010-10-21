@@ -228,7 +228,6 @@ static void copy_file_into_cde_root(char* filename) {
   strcpy(dst_path, "cde-root");
   strcat(dst_path, filename_abspath);
 
-
   // Record an entry in cde-root/cde.relpaths to map the directory
   // names of relative path to the appropriate location within cde-root/.
   //
@@ -572,6 +571,62 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
   free(redirected_filename);
 }
 
+// copy and paste from modify_syscall_first_arg ;)
+static void modify_syscall_two_args(struct tcb* tcp) {
+  assert(CDE_exec_mode);
+
+  if (!tcp->childshm) {
+    begin_setup_shmat(tcp);
+    return; // MUST punt early here!!!
+  }
+
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+  char* redirected_filename1 = redirect_filename(path);
+
+  EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
+  char* redirected_filename2 = redirect_filename(path);
+
+  // gotta do both, yuck
+  if (redirected_filename1 && redirected_filename2) {
+    strcpy(tcp->localshm, redirected_filename1);
+
+    int len1 = strlen(redirected_filename1);
+    char* redirect_file2_begin = ((char*)tcp->localshm) + len1 + 1;
+    strcpy(redirect_file2_begin, redirected_filename2);
+
+    struct user_regs_struct cur_regs;
+    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+    cur_regs.ebx = (long)tcp->childshm;
+    cur_regs.ecx = (long)(((char*)tcp->childshm) + len1 + 1);
+    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+
+    //static char tmp[MAXPATHLEN + 1];
+    //EXITIF(umovestr(tcp, (long)cur_regs.ebx, sizeof tmp, tmp) < 0);
+    //printf("  ebx: %s\n", tmp);
+    //EXITIF(umovestr(tcp, (long)cur_regs.ecx, sizeof tmp, tmp) < 0);
+    //printf("  ecx: %s\n", tmp);
+  }
+  else if (redirected_filename1) {
+    strcpy(tcp->localshm, redirected_filename1);
+
+    struct user_regs_struct cur_regs;
+    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+    cur_regs.ebx = (long)tcp->childshm; // only set EBX
+    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+  }
+  else if (redirected_filename2) {
+    strcpy(tcp->localshm, redirected_filename2);
+
+    struct user_regs_struct cur_regs;
+    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+    cur_regs.ecx = (long)tcp->childshm; // only set ECX
+    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+  }
+
+  if (redirected_filename1) free(redirected_filename1);
+  if (redirected_filename2) free(redirected_filename2);
+}
+
 
 // create a malloc'ed filename that contains a version within cde-root/
 // return NULL if the filename should NOT be redirected
@@ -815,6 +870,7 @@ void CDE_begin_execve(struct tcb* tcp) {
   }
 }
 
+
 void CDE_end_execve(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
@@ -836,79 +892,88 @@ void CDE_end_execve(struct tcb* tcp) {
 }
 
 
-void CDE_end_file_stat(struct tcb* tcp) {
-  assert(tcp->opened_filename);
-
-  if (CDE_exec_mode) {
-    // empty
-  }
-  else {
-    // return value of 0 means a successful call
-    if (tcp->u_rval == 0) {
-      // programs usually do a stat to check the status of a directory
-      // ... if it's actually a directory, then mkdir it
-      struct stat st;
-      EXITIF(umove(tcp, tcp->u_arg[1], &st) < 0);
-      // only pick up on absolute paths (starting with '/')
-      // TODO: this is imperfect, since "../other-dir/" is outside of pwd
-      // but is a relative path
-      if (S_ISDIR(st.st_mode) && tcp->opened_filename[0] == '/') {
-        // actually create that directory within cde-root/
-        // (some code is copied-and-pasted, so refactor later if necessary)
-
-        // modify filename so that it appears as a RELATIVE PATH
-        // within a cde-root/ sub-directory
-        char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
-        strcpy(dst_path, "cde-root");
-        strcat(dst_path, tcp->opened_filename);
-
-        struct path* p = str2path(dst_path);
-
-        // now mkdir all directories specified in dst_path
-        int i;
-        for (i = 1; i <= p->depth; i++) {
-          char* dn = path2str(p, i);
-          mkdir(dn, 0777);
-          free(dn);
-        }
-
-        delete_path(p);
-        free(dst_path);
-      }
-    }
-  }
-
-  free(tcp->opened_filename);
-  tcp->opened_filename = NULL;
-}
-
 void CDE_begin_file_unlink(struct tcb* tcp) {
   assert(!tcp->opened_filename);
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
   tcp->opened_filename = strdup(path);
+  //printf("CDE_begin_file_unlink %s\n", tcp->opened_filename);
 
   if (CDE_exec_mode) {
-    //printf("CDE_begin_file_unlink %s\n", tcp->opened_filename);
     modify_syscall_first_arg(tcp);
   }
   else {
-    // also delete the copy of the file in cde-root/
-    if (tcp->opened_filename[0] == '/') {
-      // modify filename so that it appears as a RELATIVE PATH
-      // within a cde-root/ sub-directory
-      char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
-      strcpy(dst_path, "cde-root");
-      strcat(dst_path, tcp->opened_filename);
-
-      unlink(dst_path);
-
-      free(dst_path);
+    char* redirected_path = redirect_filename(tcp->opened_filename);
+    if (redirected_path) {
+      unlink(redirected_path);
+      free(redirected_path);
     }
   }
 
   // no need for this anymore
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
+}
+
+
+void CDE_begin_file_link(struct tcb* tcp) {
+  //printf("CDE_begin_file_link\n");
+  if (CDE_exec_mode) {
+    modify_syscall_two_args(tcp);
+  }
+}
+
+void CDE_end_file_link(struct tcb* tcp) {
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (tcp->u_rval == 0) {
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+      char* redirected_filename1 = redirect_filename(path);
+
+      // first copy the origin file into cde-root/ before trying to link it
+      char* filename_tmp = strdup(path);
+      copy_file_into_cde_root(filename_tmp);
+      free(filename_tmp);
+
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
+      char* redirected_filename2 = redirect_filename(path);
+
+      link(redirected_filename1, redirected_filename2);
+
+      free(redirected_filename1);
+      free(redirected_filename2);
+    }
+  }
+}
+
+void CDE_begin_file_rename(struct tcb* tcp) {
+  if (CDE_exec_mode) {
+    modify_syscall_two_args(tcp);
+  }
+}
+
+void CDE_end_file_rename(struct tcb* tcp) {
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (tcp->u_rval == 0) {
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+      char* redirected_filename1 = redirect_filename(path);
+      // remove original file from cde-root/
+      if (redirected_filename1) {
+        unlink(redirected_filename1);
+        free(redirected_filename1);
+      }
+
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
+      // copy the destination file into cde-root/
+      char* filename_tmp = strdup(path);
+      copy_file_into_cde_root(filename_tmp);
+      free(filename_tmp);
+    }
+  }
 }
 
 

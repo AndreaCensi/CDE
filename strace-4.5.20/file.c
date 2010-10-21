@@ -39,6 +39,12 @@ extern void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
                                     char success_type);
 extern void CDE_begin_file_unlink(struct tcb* tcp);
 
+extern void CDE_begin_file_link(struct tcb* tcp);
+extern void CDE_end_file_link(struct tcb* tcp);
+extern void CDE_begin_file_rename(struct tcb* tcp);
+extern void CDE_end_file_rename(struct tcb* tcp);
+
+
 #define CDE_standard_fileop_macro(tcp, success_type) \
   if (entering(tcp)) { \
     CDE_begin_standard_fileop(tcp, __FUNCTION__); \
@@ -1966,12 +1972,25 @@ sys_fchroot(struct tcb *tcp)
 int
 sys_link(struct tcb *tcp)
 {
+  // pgbovine
+  // pgbovine
+  if (entering(tcp)) {
+    CDE_begin_file_link(tcp);
+  }
+  else {
+    CDE_end_file_link(tcp);
+  }
+  return 0;
+
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
 		printpath(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 
 #ifdef LINUX
@@ -2093,12 +2112,23 @@ sys_readlinkat(struct tcb *tcp)
 int
 sys_rename(struct tcb *tcp)
 {
+  // pgbovine
+  if (entering(tcp)) {
+    CDE_begin_file_rename(tcp);
+  }
+  else {
+    CDE_end_file_rename(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
 		printpath(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 
 #ifdef LINUX
