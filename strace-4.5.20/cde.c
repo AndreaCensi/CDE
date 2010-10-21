@@ -10,6 +10,9 @@ static void find_and_copy_possible_dynload_libs(char* filename);
 
 #define SHARED_PAGE_SIZE (MAXPATHLEN * 2)
 
+// quick check for whether a path is absolute
+#define IS_ABSPATH(p) (p[0] == '/')
+
 /* A structure to represent paths. */
 struct namecomp {
   int len;
@@ -37,9 +40,49 @@ static char path[MAXPATHLEN + 1];
 static char path2[MAXPATHLEN + 1];
 static char path3[MAXPATHLEN + 1];
 
-// to shut up gcc warnings
+// to shut up gcc warnings without going thru #include hell
 extern char* basename(const char *fname);
 extern char *dirname(char *path);
+extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+
+// maps relative paths to their locations within cde-root/
+// (serialized as cde-root/cde.relpaths file)
+static struct {
+  char* src;
+  char* tgt;
+} relpath_map[50];
+static int relpath_map_size = 0;
+
+
+void CDE_init_relpaths(void) {
+  FILE* relpath_f = fopen("cde-root/cde.relpaths", "r");
+  if (!relpath_f) {
+    return;
+  }
+
+  size_t len = 0;
+  ssize_t read;
+  char* tmp = NULL; // getline() mallocs for us
+  while ((read = getline(&tmp, &len, relpath_f)) != -1) {
+    // gross string manipulation in C, ugh :(
+
+    // strip off trailing newline
+    assert(tmp[read-1] == '\n');
+    tmp[read-1] = '\0';
+    char* colon = strchr(tmp, ':');
+    assert(colon);
+    char* tgt = colon + 1;
+    *colon = '\0';
+    char* src = tmp;
+
+    relpath_map[relpath_map_size].src = strdup(src);
+    relpath_map[relpath_map_size].tgt = strdup(tgt);
+    relpath_map_size++;
+    assert(relpath_map_size < 50); // bound it for simplicity
+  }
+  free(tmp);
+  fclose(relpath_f);
+}
 
 
 // ignore these special paths:
@@ -60,6 +103,11 @@ static int ignore_path(char* filename) {
 // gets the absolute path of filename, WITHOUT following any symlinks
 // mallocs a new string
 static char* realpath_nofollow(char* filename) {
+  // only call this function when NOT in CDE_exec_mode, since when we're
+  // in CDE_exec_mode, we're likely on someone else's machine, so
+  // relative paths will resolve to different absolute paths, eek!
+  assert(!CDE_exec_mode);
+
   char* bn = basename(filename); // doesn't destroy its arg
 
   char* filename_copy = strdup(filename); // dirname() destroys its arg
@@ -97,16 +145,13 @@ static int file_is_within_pwd(char* filename) {
 
   if (pwd_len <= dn_len) {
     if (strncmp(dn, pwd, pwd_len) == 0) {
-      printf("file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
       return 1;
     }
     else {
-      printf("!file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
       return 0;
     }
   }
 
-  printf("!file_is_within_pwd %s (%s) %s\n", filename, dn, pwd);
   return 0;
 }
 
@@ -137,6 +182,7 @@ void copy_file(char* src_filename, char* dst_filename) {
 // if filename is a symlink, then copy both it AND its target into cde-root
 static void copy_file_into_cde_root(char* filename) {
   assert(filename);
+  assert(!CDE_exec_mode);
 
   // don't copy filename that we're ignoring
   if (ignore_path(filename)) {
@@ -161,7 +207,7 @@ static void copy_file_into_cde_root(char* filename) {
 
 
   // by now, filename_stat contains the info for the actual target file,
-  // NOT a symlink
+  // NOT a symlink to it
   if (S_ISREG(filename_stat.st_mode)) { // regular file
     // resolve absolute path to get rid of '..', '.', and other weird symbols
     char* filename_abspath = realpath_nofollow(filename);
@@ -170,9 +216,50 @@ static void copy_file_into_cde_root(char* filename) {
     strcpy(dst_path, "cde-root");
     strcat(dst_path, filename_abspath);
 
-    //char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-    //strcpy(dst_path, "cde-root");
-    //strcat(dst_path, filename);
+
+    // Record an entry in cde-root/cde.relpaths to map the directory
+    // names of relative path to the appropriate location within cde-root/.
+    //
+    // We need to do this because when we move the package to another
+    // machine, relative paths will be resolved differently, so we need
+    // to consult cde.relpaths to find out where files are located in
+    // the package.
+    if (!IS_ABSPATH(filename)) {
+      char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
+      char* rel_dir = dirname(rel_filename_copy);
+
+      char* dst_path_copy = strdup(dst_path); // dirname() destroys its arg
+      char* dir_within_package = dirname(dst_path_copy);
+
+      // don't insert duplicates
+      int i;
+      int found = 0;
+      for (i = 0; i < relpath_map_size; i++) {
+        if (strcmp(relpath_map[i].src, rel_dir) == 0) {
+          assert(strcmp(relpath_map[i].tgt, dir_within_package) == 0);
+          found = 1;
+          break;
+        }
+      }
+
+      if (!found) {
+        relpath_map[relpath_map_size].src = strdup(rel_dir);
+        relpath_map[relpath_map_size].tgt = strdup(dir_within_package);
+        relpath_map_size++;
+        assert(relpath_map_size < 50); // bound it for simplicity
+
+        FILE* relpath_f = fopen("cde-root/cde.relpaths", "a");
+        assert(relpath_f);
+
+        // colon-delimited to support paths with spaces in them
+        fprintf(relpath_f, "%s:%s\n", rel_dir, dir_within_package);
+        fclose(relpath_f);
+      }
+
+      free(dst_path_copy);
+      free(rel_filename_copy);
+    }
+
 
     // lazy optimization to avoid redundant copies ...
     struct stat dst_path_stat;
@@ -182,6 +269,7 @@ static void copy_file_into_cde_root(char* filename) {
       if (dst_path_stat.st_mtime >= filename_stat.st_mtime) {
         //printf("PUNTED on %s\n", dst_path);
         free(dst_path);
+        free(filename_abspath);
         return;
       }
     }
@@ -229,7 +317,7 @@ static void copy_file_into_cde_root(char* filename) {
       strcat(path3, filename_abspath);
 
       // create a new identical symlink in cde-root/
-      printf("symlink(%s, %s)\n", orig_symlink_target, path3);
+      //printf("symlink(%s, %s)\n", orig_symlink_target, path3);
       EXITIF(symlink(orig_symlink_target, path3) < 0);
 
       // use path3 as a temporary holding spot (again!)
@@ -238,7 +326,7 @@ static void copy_file_into_cde_root(char* filename) {
       strcat(path3, "/");
       strcat(path3, orig_symlink_target);
 
-      printf("  cp %s %s\n", path2, path3);
+      //printf("  cp %s %s\n", path2, path3);
       // copy the target file over to cde-root/
       if ((link(path2, path3) != 0) && (errno != EEXIST)) {
         copy_file(path2, path3);
@@ -276,6 +364,7 @@ static void copy_file_into_cde_root(char* filename) {
 }
 
 
+#ifdef DEPRECATED
 static void copy_file_into_package_DEPRECATED(char* filename) {
   assert(filename);
 
@@ -356,6 +445,7 @@ static void copy_file_into_package_DEPRECATED(char* filename) {
     }
   }
 }
+#endif
 
 
 #define STRING_ISGRAPHIC(c) ( ((c) == '\t' || (isascii (c) && isprint (c))) )
@@ -539,31 +629,39 @@ static char* redirect_filename(char* filename) {
   if (!file_is_within_pwd(filename)) {
 
     if (filename[0] == '/') {
-      // easy case: absolute path
+      // easy case: absolute path, just do a plain redirect :)
       char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
       strcpy(dst_path, "cde-root");
       strcat(dst_path, filename);
       return dst_path;
     }
     else {
-      // oh man, it's gonna be hard to handle the "../hello.txt" case
-      // since we don't know what '..' means on this machine.  here's how
-      // we're gonna try to do it, though: get pwd, which should be loaded
-      // from cde.environment if possible.  now look up pwd and try to
-      // tack on filename to it and use realpath to resolve properly
-      char* pwd = getenv("PWD");
-      strcpy(path, pwd);
-      strcat(path, "/");
-      strcat(path, filename);
+      // hard case: relative path ... consult relpath_map to do redirection
+      char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
+      char* rel_dir = dirname(rel_filename_copy);
 
-      char* filename_abspath = realpath_nofollow(path);
+      char* bn = basename(filename); // doesn't destroy its arg
 
-      char* dst_path = malloc(strlen(filename_abspath) + strlen("cde-root") + 1);
-      strcpy(dst_path, "cde-root");
-      strcat(dst_path, filename_abspath);
-      printf("--- %s | %s | %s | %s\n", filename, path, filename_abspath, dst_path);
+      int i;
+      int found = 0;
+      char* dst_dir = NULL;
+      for (i = 0; i < relpath_map_size; i++) {
+        if (strcmp(relpath_map[i].src, rel_dir) == 0) {
+          dst_dir = relpath_map[i].tgt;
+          found = 1;
+          break;
+        }
+      }
 
-      free(filename_abspath);
+      // if we can't find the path in relpath_map, then we're screwed!!!
+      assert(found && dst_dir);
+
+      char* dst_path = malloc(strlen(dst_dir) + strlen(bn) + 1 + 1);
+      strcpy(dst_path, dst_dir);
+      strcat(dst_path, "/");
+      strcat(dst_path, bn);
+
+      free(rel_filename_copy);
       return dst_path;
     }
   }

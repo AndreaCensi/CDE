@@ -90,6 +90,7 @@ extern char *optarg;
 
 // pgbovine
 extern char CDE_exec_mode;
+extern void CDE_init_relpaths(void);
 extern void alloc_tcb_CDE_fields(struct tcb* tcp);
 extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
@@ -834,6 +835,9 @@ main(int argc, char *argv[])
 
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
+
+    // process cde-root/cde.relpaths if it exists
+    CDE_init_relpaths();
   }
   else {
     CDE_exec_mode = 0;
@@ -863,6 +867,9 @@ main(int argc, char *argv[])
       fprintf(log, "\n");
       fclose(log);
     }
+
+    // start over with cde.relpaths so that we don't multiple-append
+    unlink("cde-root/cde.relpaths");
   }
 
   // pgbovine - allow most slutty of permissions for new files/directories
