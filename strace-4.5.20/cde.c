@@ -319,9 +319,16 @@ static void copy_file_into_cde_root(char* filename) {
       assert(path[0] == '/');
 
       // user path2 as a temporary holding spot
-      strcpy(path2, path);
-      strcat(path2, "/");
-      strcat(path2, orig_symlink_target);
+      // ugh, remember that symlinks can point to both absolute AND
+      // relative paths ...
+      if (IS_ABSPATH(orig_symlink_target)) {
+        strcpy(path2, orig_symlink_target);
+      }
+      else {
+        strcpy(path2, path);
+        strcat(path2, "/");
+        strcat(path2, orig_symlink_target);
+      }
 
       // use path3 as a temporary holding spot
       strcpy(path3, "cde-root");
