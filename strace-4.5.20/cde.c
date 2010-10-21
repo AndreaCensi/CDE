@@ -40,6 +40,22 @@ extern char* basename(const char *fname);
 extern char *dirname(char *path);
 
 
+// ignore these special paths:
+static int ignore_path(char* filename) {
+  // /dev and /proc are special system directories with fake files
+  //
+  // .Xauthority is used for X11 authentication via ssh, so we need to
+  // use the REAL version and not the one in cde-root/
+  if ((strncmp(filename, "/dev/", 5) == 0) ||
+      (strncmp(filename, "/proc/", 6) == 0) ||
+      (strcmp(basename(filename), ".Xauthority") == 0)) {
+    return 1;
+  }
+
+  return 0;
+}
+
+
 // cp $src_filename $dst_filename
 void copy_file(char* src_filename, char* dst_filename) {
   int inF;
@@ -65,6 +81,11 @@ void copy_file(char* src_filename, char* dst_filename) {
 
 static void copy_file_into_package(char* filename) {
   assert(filename);
+
+  // don't copy filename that we're ignoring
+  if (ignore_path(filename)) {
+    return;
+  }
 
   // this will NOT follow the symlink ...
   struct stat filename_stat;
@@ -314,13 +335,7 @@ static char* redirect_filename(char* filename) {
   assert(filename);
 
   // don't redirect certain special paths
-  // /dev and /proc are special system directories with fake files
-  //
-  // .Xauthority is used for X11 authentication via ssh, so we need to
-  // use the REAL version and not the one in cde-root/
-  if ((strncmp(filename, "/dev/", 5) == 0) ||
-      (strncmp(filename, "/proc/", 6) == 0) ||
-      (strcmp(basename(filename), ".Xauthority") == 0)) {
+  if (ignore_path(filename)) {
     return NULL;
   }
 
@@ -559,8 +574,18 @@ void CDE_begin_file_unlink(struct tcb* tcp) {
     modify_syscall_first_arg(tcp);
   }
   else {
-    // TODO: delete the copy of the file in cde-root/
-    //       in addition to deleting it from its original location
+    // also delete the copy of the file in cde-root/
+    if (tcp->opened_filename[0] == '/') {
+      // modify filename so that it appears as a RELATIVE PATH
+      // within a cde-root/ sub-directory
+      char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
+      strcpy(dst_path, "cde-root");
+      strcat(dst_path, tcp->opened_filename);
+
+      unlink(dst_path);
+
+      free(dst_path);
+    }
   }
 
   // no need for this anymore
