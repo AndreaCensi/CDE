@@ -173,9 +173,9 @@ static char* realpath_nofollow(char* filename) {
 static int file_is_within_pwd(char* filename) {
 
   if (IS_ABSPATH(filename)) {
-    // If we're running on another machine, make sure that this
-    // properly grabs the value of $PWD from cde-root/cde.environment
-    char* pwd = getenv("PWD");
+    // grab the TRUE system's pwd
+    getcwd(path, sizeof path);
+    char* pwd = path;
 
     // just do a substring comparison
     char* filename_copy = strdup(filename);
@@ -184,8 +184,16 @@ static int file_is_within_pwd(char* filename) {
     int dn_len = strlen(dn);
     int pwd_len = strlen(pwd);
 
+    // special case hack - if dn ends with '/.', then take its dirname
+    // AGAIN to get rid of this annoyance :)
+    while ((dn_len >= 2) && dn[dn_len - 2] == '/' && dn[dn_len - 1] == '.') {
+      dn = dirname(dn);
+      dn_len = strlen(dn);
+    }
+
     char is_within_pwd = 0;
 
+    //printf("file_is_within_pwd %s %s\n", dn, pwd);
     if ((pwd_len <= dn_len) && strncmp(dn, pwd, pwd_len) == 0) {
       is_within_pwd = 1;
     }
@@ -551,7 +559,7 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
     return;
   }
 
-  //printf("  attempt %s %d\n", tcp->opened_filename, tcp->pid);
+  //printf("  attempt to modify %s => %s %d\n", tcp->opened_filename, redirected_filename, tcp->pid);
 
   if (!tcp->childshm) {
     begin_setup_shmat(tcp);
@@ -1426,5 +1434,53 @@ void strcpy_redirected_cderoot(char* dst, char* src) {
   else {
     strcpy(dst, src);
   }
+}
+
+// adapted from the Goanna project by Spillane et al.
+// dst_in_child is a pointer in the child's address space
+static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
+  while (size >= sizeof(int)) {
+    long w = *((long*)src);
+    EXITIF(ptrace(PTRACE_POKEDATA, pid, dst_child, (long)w) < 0);
+    size -= sizeof(int);
+    dst_child = (char*)dst_child + sizeof(int);
+    src = (char*)src + sizeof(int);
+  }
+
+  /* Cleanup the last little bit. */
+  if (size) {
+    union {
+        long l;
+        char c[4];
+    } dw, sw;
+    errno = 0;
+    dw.l = ptrace(PTRACE_PEEKDATA, pid, dst_child, 0);
+    EXITIF(errno);
+    sw.l = *((long*)src);
+
+    /* Little endian sucks. */
+    dw.c[0] = sw.c[0];
+    if (size >= 2)
+      dw.c[1] = sw.c[1];
+    if (size >= 3)
+      dw.c[2] = sw.c[2];
+	  assert(size < 4);
+
+    EXITIF(ptrace(PTRACE_POKEDATA, pid, dst_child, dw.l) < 0);
+  }
+}
+
+// hmmm, don't do any path spoofing yet
+void CDE_end_getcwd(struct tcb* tcp) {
+  /*
+  if (!syserror(tcp)) {
+    //char stuff[100];
+    //strcpy(stuff, "/tmp/chttpd/obj-klee/src");
+    //memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], stuff, 25);
+
+    //EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+    //printf("CDE_end_getcwd %s\n", path);
+  }
+  */
 }
 

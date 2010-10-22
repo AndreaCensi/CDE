@@ -51,6 +51,8 @@ extern void CDE_end_mkdir(struct tcb* tcp);
 extern void CDE_begin_rmdir(struct tcb* tcp);
 extern void CDE_end_rmdir(struct tcb* tcp);
 
+extern void CDE_end_getcwd(struct tcb* tcp);
+
 
 #define CDE_standard_fileop_macro(tcp, success_type) \
   if (entering(tcp)) { \
@@ -2705,6 +2707,13 @@ sys_getdirentries(struct tcb *tcp)
 int
 sys_getcwd(struct tcb *tcp)
 {
+  // pgbovine
+  if (exiting(tcp)) {
+    CDE_end_getcwd(tcp);
+  }
+  return 0;
+
+  /*
 	if (exiting(tcp)) {
 		if (syserror(tcp))
 			tprintf("%#lx", tcp->u_arg[0]);
@@ -2712,6 +2721,7 @@ sys_getcwd(struct tcb *tcp)
 			printpathn(tcp, tcp->u_arg[0], tcp->u_rval - 1);
 		tprintf(", %lu", tcp->u_arg[1]);
 	}
+  */
 	return 0;
 }
 #endif /* LINUX */

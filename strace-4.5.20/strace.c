@@ -588,9 +588,11 @@ startup_child (char **argv)
           else if (is_home) {
             setenv("HOME", stripped_str, 1);
           }
+          /* pgbovine - don't worry about PWD yet ...
           else if (is_pwd) {
             setenv("PWD", stripped_str, 1);
           }
+          */
 
           free(stripped_str);
           break;
@@ -619,10 +621,12 @@ startup_child (char **argv)
 
     fputs("HOME=", envF);
     fputs(getenv("HOME"), envF);
-    fputs("\n", envF);
 
+    /*
+    fputs("\n", envF);
     fputs("PWD=", envF);
     fputs(getenv("PWD"), envF);
+    */
 
     fclose(envF);
   }
@@ -906,7 +910,7 @@ main(int argc, char *argv[])
 
   // pgbovine - only track selected system calls
   // qualify actually mutates this string, so we can't pass in a constant
-  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64,oldstat,oldlstat,link,unlink,rename,access,creat,chmod,chown,chown32,lchown,lchown32,readlink,utime,truncate,truncate64,chdir,mkdir,rmdir");
+  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64,oldstat,oldlstat,link,unlink,rename,access,creat,chmod,chown,chown32,lchown,lchown32,readlink,utime,truncate,truncate64,chdir,mkdir,rmdir,getcwd");
 	qualify(tmp);
   free(tmp);
 
