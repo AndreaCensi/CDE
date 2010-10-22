@@ -763,35 +763,86 @@ void CDE_begin_execve(struct tcb* tcp) {
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
   tcp->opened_filename = strdup(path);
 
-  if (CDE_exec_mode) {
+  // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
+  // is a valid executable file WITHIN cde-root/ ... otherwise don't do
+  // anything and simply let the execve fail just like it's supposed to
+  struct stat filename_stat;
 
-    // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
-    // is a valid executable file WITHIN cde-root/ ... otherwise don't do
-    // anything and simply let the execve fail just like it's supposed to
-    struct stat filename_stat;
+  //printf("%s CDE_begin_execve\n", tcp->opened_filename);
 
-    //printf("%s CDE_begin_execve\n", tcp->opened_filename);
-
-    char* redirected_path = redirect_filename(tcp->opened_filename);
-    if (redirected_path) {
-      // TODO: we don't check whether it's a real executable file :/
-      if (stat(redirected_path, &filename_stat) != 0) {
-        free(redirected_path);
-        return;
-      }
+  char* redirected_path = redirect_filename(tcp->opened_filename);
+  char* path_to_executable = NULL;
+  if (redirected_path) {
+    // TODO: we don't check whether it's a real executable file :/
+    if (stat(redirected_path, &filename_stat) != 0) {
       free(redirected_path);
+      return;
     }
-    else {
-      // just check the file itself
-      // TODO: we don't check whether it's a real executable file :/
-      if (stat(tcp->opened_filename, &filename_stat) != 0) {
-        return;
+    path_to_executable = redirected_path;
+  }
+  else {
+    // just check the file itself
+    // TODO: we don't check whether it's a real executable file :/
+    if (stat(tcp->opened_filename, &filename_stat) != 0) {
+      return;
+    }
+    path_to_executable = tcp->opened_filename;
+  }
+  assert(path_to_executable);
+
+  // ld-linux.so.2 only works on dynamically-linked binary executable
+  // files; it will fail if you invoke it on:
+  //   - a textual script file
+  //   - a statically-linked binary
+  //
+  // for a textual script file, we must invoke ld-linux.so.2 on the
+  // target of the shebang #! (which can itself take arguments)
+  //
+  // e.g., #! /bin/sh
+  // e.g., #! /usr/bin/env python
+  //
+  // TODO: for a statically-linked binary, don't do anything
+  char is_textual_script = 0;
+  char is_elf_binary = 0;
+  char* script_command = NULL;
+
+  FILE* f = fopen(path_to_executable, "rb"); // open in binary mode
+  assert(f);
+  char header[5];
+  memset(header, 0, sizeof(header));
+  fgets(header, 5, f); // 5 means 4 bytes + 1 null terminating byte
+  if (strcmp(header, "\177ELF") == 0) {
+    is_elf_binary = 1;
+  }
+  fclose(f);
+
+  if (is_elf_binary) {
+    // TODO: look for whether it's a statically-linked binary ...
+    // if so, then there is NO need to call ld-linux.so.2 on it;
+    // we can just execute it directly (in fact, ld-linux.so.2
+    // will fail on static binaries!)
+  }
+  else {
+    // find out whether it's a script file (starting with #! line)
+    FILE* f = fopen(path_to_executable, "rb"); // open in binary mode
+
+    size_t len = 0;
+    ssize_t read;
+    char* tmp = NULL; // getline() mallocs for us
+    read = getline(&tmp, &len, f);
+    if (read > 2) {
+      assert(tmp[read-1] == '\n'); // strip of trailing newline
+      tmp[read-1] = '\0'; // strip of trailing newline
+      if (tmp[0] == '#' && tmp[1] == '!') {
+        is_textual_script = 1;
+        script_command = strdup(&tmp[2]);
       }
     }
+    free(tmp);
+  }
 
-    //printf("%s survived\n", tcp->opened_filename);
 
-
+  if (CDE_exec_mode) {
     // set up shared memory segment if we haven't done so yet
     if (!tcp->childshm) {
       begin_setup_shmat(tcp);
@@ -800,20 +851,110 @@ void CDE_begin_execve(struct tcb* tcp) {
       free(tcp->opened_filename);
       tcp->opened_filename = NULL;
 
-      return; // MUST punt early here!!!
+      goto done; // MUST punt early here!!!
     }
 
     /* we're gonna do some craziness here to redirect the OS to call
        cde-root/ld-linux.so.2 rather than the real program, since
        ld-linux.so.2 is closely-tied with the version of libc in
-       cde-root/.
+       cde-root/. */
+    if (is_textual_script) {
+      /*  we're running a script with a shebang (#!), so
+          let's set up the shared memory segment (tcp->localshm) like so:
 
-       TODO: this will FAIL when trying to run statically-linked
-       executables, so in the future, we need to detect when an ELF
-       binary is statically-linked (i.e., it doesn't contain an INTERP
-       header when read by "readelf -l")
-      
-       let's set up the shared memory segment (tcp->localshm) like so:
+    base -->       tcp->localshm : "cde-root/ld-linux.so.2"
+          script_command token 0 : "/usr/bin/env"
+          script_command token 1 : "python"
+              ... (for as many tokens as available) ...
+    new_argv -->   argv pointers : point to tcp->childshm ("cde-root/ld-linux.so.2")
+                   argv pointers : point to script_command token 0
+                   argv pointers : point to script_command token 1
+              ... (for as many tokens as available) ...
+                   argv pointers : point to tcp->u_arg[0] (original program name)
+                   argv pointers : point to child program's argv[1]
+                   argv pointers : point to child program's argv[2]
+                   argv pointers : point to child program's argv[3]
+                   argv pointers : [...]
+                   argv pointers : NULL
+
+        Note that we only need to do this if we're in CDE_exec_mode */
+
+      //printf("script_command='%s', path_to_executable='%s'\n", script_command, path_to_executable);
+
+      char* base = (char*)tcp->localshm;
+      strcpy(base, CDE_ROOT "/ld-linux.so.2");
+      int ld_linux_offset = strlen(CDE_ROOT "/ld-linux.so.2") + 1;
+
+      char* cur_loc = (char*)(base + ld_linux_offset);
+      char* script_command_token_starts[30]; // stores starting locations of each token
+
+      int script_command_num_tokens = 0;
+
+      // tokenize script_command into tokens, and insert them into argv
+      char* p;
+      for (p = strtok(script_command, " "); p; p = strtok(NULL, " ")) {
+        //printf("  token = %s\n", p);
+        strcpy(cur_loc, p);
+        script_command_token_starts[script_command_num_tokens] = cur_loc;
+
+        cur_loc += (strlen(p) + 1);
+        script_command_num_tokens++;
+      }
+
+      char** new_argv = (char**)(cur_loc);
+
+      // really subtle, these addresses should be in the CHILD's address space,
+      // not the parent's
+
+      // points to "cde-root/ld-linux.so.2"
+      new_argv[0] = (char*)tcp->childshm;
+
+      // points to all the tokens of script_command
+      int i;
+      for (i = 0; i < script_command_num_tokens; i++) {
+        new_argv[i+1] = (char*)tcp->childshm + (script_command_token_starts[i] - base);
+      }
+
+      // now populate argv[script_command_num_tokens:] directly from child's original space
+      // (original arguments)
+      char** child_argv = (char**)tcp->u_arg[1]; // in child's address space
+      char* cur_arg = NULL;
+      i = 0; // start at argv[0]
+      while (1) {
+        EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, (void*)&cur_arg) < 0);
+        new_argv[i + script_command_num_tokens + 1] = cur_arg;
+        if (cur_arg == NULL) {
+          break;
+        }
+        i++;
+      }
+
+      i = 0;
+      cur_arg = NULL;
+      while (1) {
+        cur_arg = new_argv[i];
+        if (cur_arg) {
+          EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
+          //printf("  new_argv[%d] = %s\n", i, path);
+          i++;
+        }
+        // argv is null-terminated
+        else {
+          break;
+        }
+      }
+
+      // now set ebx to the new program name and ecx to the new argv array
+      // to alter the arguments of the execv system call :0
+      struct user_regs_struct cur_regs;
+      EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+      cur_regs.ebx = (long)tcp->childshm;            // location of base
+      cur_regs.ecx = ((long)tcp->childshm) + ((char*)new_argv - base); // location of new_argv
+      ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+    }
+    else {
+      /* we're running a dynamically-linked binary executable, go
+         let's set up the shared memory segment (tcp->localshm) like so:
 
     base -->       tcp->localshm : "cde-root/ld-linux.so.2"
     new_argv -->   argv pointers : point to tcp->childshm ("cde-root/ld-linux.so.2")
@@ -826,56 +967,79 @@ void CDE_begin_execve(struct tcb* tcp) {
 
         Note that we only need to do this if we're in CDE_exec_mode */
 
-    char* base = (char*)tcp->localshm;
-    strcpy(base, CDE_ROOT "/ld-linux.so.2");
-    int offset = strlen(CDE_ROOT "/ld-linux.so.2") + 1;
-    char** new_argv = (char**)(base + offset);
+      char* base = (char*)tcp->localshm;
+      strcpy(base, CDE_ROOT "/ld-linux.so.2");
+      int offset = strlen(CDE_ROOT "/ld-linux.so.2") + 1;
+      char** new_argv = (char**)(base + offset);
 
-    // really subtle, these addresses should be in the CHILD's address space,
-    // not the parent's
+      // really subtle, these addresses should be in the CHILD's address space,
+      // not the parent's
 
-    // points to "cde-root/ld-linux.so.2"
-    new_argv[0] = (char*)tcp->childshm;
-    // points to original program name (full path)
-    new_argv[1] = (char*)tcp->u_arg[0];
+      // points to "cde-root/ld-linux.so.2"
+      new_argv[0] = (char*)tcp->childshm;
+      // points to original program name (full path)
+      new_argv[1] = (char*)tcp->u_arg[0];
 
-    // now populate argv[1:] directly from child's original space
-    // (original arguments)
- 
-    char** child_argv = (char**)tcp->u_arg[1]; // in child's address space
-    char* cur_arg = NULL;
-    int i = 1; // start at argv[1], since we're ignoring argv[0]
-    while (1) {
-      EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, (void*)&cur_arg) < 0);
-      new_argv[i + 1] = cur_arg;
-      if (cur_arg == NULL) {
-        break;
-      }
-      i++;
-    }
-
-    i = 0;
-    cur_arg = NULL;
-    while (1) {
-      cur_arg = new_argv[i];
-      if (cur_arg) {
-        EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
-        //printf("  new_argv[%d] = %s\n", i, path);
+      // now populate argv[1:] directly from child's original space
+      // (original arguments)
+   
+      char** child_argv = (char**)tcp->u_arg[1]; // in child's address space
+      char* cur_arg = NULL;
+      int i = 1; // start at argv[1], since we're ignoring argv[0]
+      while (1) {
+        EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, (void*)&cur_arg) < 0);
+        new_argv[i + 1] = cur_arg;
+        if (cur_arg == NULL) {
+          break;
+        }
         i++;
       }
-      // argv is null-terminated
-      else {
+
+      i = 0;
+      cur_arg = NULL;
+      while (1) {
+        cur_arg = new_argv[i];
+        if (cur_arg) {
+          EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
+          //printf("  new_argv[%d] = %s\n", i, path);
+          i++;
+        }
+        // argv is null-terminated
+        else {
+          break;
+        }
+      }
+
+      // now set ebx to the new program name and ecx to the new argv array
+      // to alter the arguments of the execv system call :0
+      struct user_regs_struct cur_regs;
+      EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+      cur_regs.ebx = (long)tcp->childshm;            // location of base
+      cur_regs.ecx = ((long)tcp->childshm) + offset; // location of new_argv
+      ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+    }
+  }
+  else {
+    // very subtle!  if we're executing a textual script with a #!, we
+    // need to grab the name of the executable from the #! string into
+    // cde-root, since strace doesn't normally pick it up as a dependency
+    if (is_textual_script) {
+      //printf("script_command='%s', path_to_executable='%s'\n", script_command, path_to_executable);
+      char* p;
+      for (p = strtok(script_command, " "); p; p = strtok(NULL, " ")) {
+        struct stat p_stat;
+        if (stat(p, &p_stat) == 0) {
+          copy_file_into_cde_root(p);
+        }
         break;
       }
     }
+  }
 
-    // now set ebx to the new program name and ecx to the new argv array
-    // to alter the arguments of the execv system call :0
-    struct user_regs_struct cur_regs;
-    EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
-    cur_regs.ebx = (long)tcp->childshm;            // location of base
-    cur_regs.ecx = ((long)tcp->childshm) + offset; // location of new_argv
-    ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
+done:
+  free(redirected_path); // don't free until we no longer need path_to_executable
+  if (script_command) {
+    free(script_command);
   }
 }
 

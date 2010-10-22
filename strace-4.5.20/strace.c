@@ -532,6 +532,10 @@ startup_child (char **argv)
 	int pid = 0;
 	struct tcb *tcp;
 
+  // pgbovine - ccache compiler cache causes weird issues with
+  // non-reproducibility, so simply disable it
+  setenv("CCACHE_DISABLE", "1", 1);
+
   // pgbovine - muck with selected environment variables depending on CDE_exec_mode
   if (CDE_exec_mode) {
     // load environment variables from "cde-root/cde.environment" file
