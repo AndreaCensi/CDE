@@ -97,7 +97,8 @@ extern void copy_file(char* src_filename, char* dst_filename);
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
-int dtime = 0, xflag = 0, qflag = 0;
+int dtime = 0, xflag = 0, qflag = 1; // pgbovine - turn on quiet mode (-q) by
+                                     // default to shut up terminal line noise
 cflag_t cflag = CFLAG_NONE;
 static int iflag = 0, interactive = 0, pflag_seen = 0, rflag = 0, tflag = 0;
 /*
@@ -2711,11 +2712,14 @@ Process %d attached (waiting for parent)\n",
 							si.si_addr;
 				}
 #endif
+        // pgbovine - silence signal printouts
+        /*
 				printleader(tcp);
 				tprintf("--- %s (%s) @ %lx (%lx) ---",
 					signame(WSTOPSIG(status)),
 					strsignal(WSTOPSIG(status)), pc, addr);
 				printtrailer();
+        */
 			}
 			if (((tcp->flags & TCB_ATTACHED) ||
 			     tcp->nclone_threads > 0) &&
