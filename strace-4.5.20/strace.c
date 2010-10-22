@@ -94,6 +94,7 @@ extern void CDE_init_relpaths(void);
 extern void alloc_tcb_CDE_fields(struct tcb* tcp);
 extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
+extern void strcpy_redirected_cderoot(char* dst, char* src);
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -531,6 +532,102 @@ startup_child (char **argv)
 	int pid = 0;
 	struct tcb *tcp;
 
+  // pgbovine - muck with selected environment variables depending on CDE_exec_mode
+  if (CDE_exec_mode) {
+    // load environment variables from "cde-root/cde.environment" file
+    FILE* envF = fopen(CDE_ROOT "/cde.environment", "r");
+    if (!envF) {
+      perror(CDE_ROOT "/cde.environment");
+      cleanup();
+      exit(1);
+    }
+
+    char* line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    while ((read = getline(&line, &len, envF)) != -1) {
+      char* p;
+      char* stripped_str = NULL;
+
+      char is_path = 0;
+      char is_user = 0;
+      char is_home = 0;
+      char is_pwd  = 0;
+
+      for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
+        // find PATH environment variable
+        if (strcmp(p, "PATH") == 0) {
+          is_path = 1;
+          continue;
+        }
+        else if (strcmp(p, "USER") == 0) {
+          is_user = 1;
+          continue;
+        }
+        else if (strcmp(p, "HOME") == 0) {
+          is_home = 1;
+          continue;
+        }
+        else if (strcmp(p, "PWD") == 0) {
+          is_pwd = 1;
+          continue;
+        }
+
+        if (is_path || is_user || is_home || is_pwd) {
+          stripped_str = strdup(p);
+          if (stripped_str[strlen(stripped_str) - 1] == '\n') {
+            stripped_str[strlen(stripped_str) - 1] = '\0';
+          }
+
+          if (is_path) {
+            setenv("PATH", stripped_str, 1);
+          }
+          else if (is_user) {
+            setenv("USER", stripped_str, 1);
+          }
+          else if (is_home) {
+            setenv("HOME", stripped_str, 1);
+          }
+          else if (is_pwd) {
+            setenv("PWD", stripped_str, 1);
+          }
+
+          free(stripped_str);
+          break;
+        }
+      }
+    }
+    free(line);
+  }
+  else {
+    // save current value of selected environment vars to "cde-root/cde.environment" file
+    mkdir(CDE_ROOT, 0777);
+    FILE* envF = fopen(CDE_ROOT "/cde.environment", "w");
+    if (!envF) {
+      perror(CDE_ROOT "/cde.environment");
+      cleanup();
+      exit(1);
+    }
+
+    fputs("PATH=", envF);
+    fputs(getenv("PATH"), envF);
+    fputs("\n", envF);
+
+    fputs("USER=", envF);
+    fputs(getenv("USER"), envF);
+    fputs("\n", envF);
+
+    fputs("HOME=", envF);
+    fputs(getenv("HOME"), envF);
+    fputs("\n", envF);
+
+    fputs("PWD=", envF);
+    fputs(getenv("PWD"), envF);
+
+    fclose(envF);
+  }
+
+
   // pgbovine
   char path_to_search[MAXPATHLEN];
   path_to_search[0] = '\0';
@@ -557,102 +654,6 @@ startup_child (char **argv)
 		char *path;
 		int m, n, len;
 
-    // pgbovine - muck with $PATH variable depending on CDE_exec_mode
-    // TODO: can override other environment variables here too
-    if (CDE_exec_mode) {
-      // load environment variables from "cde-root/cde.environment" file
-      FILE* envF = fopen(CDE_ROOT "/cde.environment", "r");
-      if (!envF) {
-        perror(CDE_ROOT "/cde.environment");
-        cleanup();
-        exit(1);
-      }
-
-      char* line = NULL;
-      size_t len = 0;
-      ssize_t read;
-      while ((read = getline(&line, &len, envF)) != -1) {
-        char* p;
-        char* stripped_str = NULL;
-
-        char is_path = 0;
-        char is_user = 0;
-        char is_home = 0;
-        char is_pwd  = 0;
-
-        for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
-          // find PATH environment variable
-          if (strcmp(p, "PATH") == 0) {
-            is_path = 1;
-            continue;
-          }
-          else if (strcmp(p, "USER") == 0) {
-            is_user = 1;
-            continue;
-          }
-          else if (strcmp(p, "HOME") == 0) {
-            is_home = 1;
-            continue;
-          }
-          else if (strcmp(p, "PWD") == 0) {
-            is_pwd = 1;
-            continue;
-          }
-
-          if (is_path || is_user || is_home || is_pwd) {
-            stripped_str = strdup(p);
-            if (stripped_str[strlen(stripped_str) - 1] == '\n') {
-              stripped_str[strlen(stripped_str) - 1] = '\0';
-            }
-
-            if (is_path) {
-              setenv("PATH", stripped_str, 1);
-            }
-            else if (is_user) {
-              setenv("USER", stripped_str, 1);
-            }
-            else if (is_home) {
-              setenv("HOME", stripped_str, 1);
-            }
-            else if (is_pwd) {
-              setenv("PWD", stripped_str, 1);
-            }
-
-            free(stripped_str);
-            break;
-          }
-        }
-      }
-      free(line);
-    }
-    else {
-      // save current value of selected environment vars to "cde-root/cde.environment" file
-      mkdir(CDE_ROOT, 0777);
-      FILE* envF = fopen(CDE_ROOT "/cde.environment", "w");
-      if (!envF) {
-        perror(CDE_ROOT "/cde.environment");
-        cleanup();
-        exit(1);
-      }
-
-      fputs("PATH=", envF);
-      fputs(getenv("PATH"), envF);
-      fputs("\n", envF);
-
-      fputs("USER=", envF);
-      fputs(getenv("USER"), envF);
-      fputs("\n", envF);
-
-      fputs("HOME=", envF);
-      fputs(getenv("HOME"), envF);
-      fputs("\n", envF);
-
-      fputs("PWD=", envF);
-      fputs(getenv("PWD"), envF);
-
-      fclose(envF);
-    }
-
 		for (path = getenv("PATH"); path && *path; path += m) {
 			if (strchr(path, ':')) {
 				n = strchr(path, ':') - path;
@@ -677,10 +678,7 @@ startup_child (char **argv)
 
       // pgbovine
       if (CDE_exec_mode) {
-        // use "cde-root/" prefix to find the version of executable
-        // that's in the CDE package
-        strcpy(path_to_search, CDE_ROOT);
-        strcat(path_to_search, pathname);
+        strcpy_redirected_cderoot(path_to_search, pathname);
       }
       else {
         strcpy(path_to_search, pathname);
@@ -695,9 +693,20 @@ startup_child (char **argv)
 				break;
 		}
 	}
+
+  // pgbovine - if we still haven't initialized it yet, do so now
+  if (path_to_search[0] == '\0') {
+    if (CDE_exec_mode) {
+      strcpy_redirected_cderoot(path_to_search, pathname);
+    }
+    else {
+      strcpy(path_to_search, pathname);
+    }
+  }
+
 	if (stat(path_to_search, &statbuf) < 0) {
-		fprintf(stderr, "%s: %s: command not found\n",
-			progname, filename);
+		fprintf(stderr, "%s: %s: command not found (path_to_search=%s)\n",
+			progname, filename, path_to_search);
 		exit(1);
 	}
 	strace_child = pid = fork();

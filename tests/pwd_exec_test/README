@@ -1,0 +1,3 @@
+test executing a program from pwd as ./hello-world
+
+also execute a copy in an parent directory as ../hello-world-parent-dir

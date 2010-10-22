@@ -763,26 +763,24 @@ void CDE_begin_execve(struct tcb* tcp) {
     struct stat filename_stat;
 
     //printf("%s CDE_begin_execve\n", tcp->opened_filename);
-    // TODO: copy-and-paste alert
-    if (IS_ABSPATH(tcp->opened_filename)) {
-      // for an absolute path, check the version within cde-root/
-      char* dst_path = prepend_cderoot(tcp->opened_filename);
 
-      if (stat(dst_path, &filename_stat) != 0) {
-        free(dst_path);
+    char* redirected_path = redirect_filename(tcp->opened_filename);
+    if (redirected_path) {
+      // TODO: we don't check whether it's a real executable file :/
+      if (stat(redirected_path, &filename_stat) != 0) {
+        free(redirected_path);
         return;
       }
-
-      // TODO: we don't check whether it's a real executable file :/
-      free(dst_path);
+      free(redirected_path);
     }
     else {
       // just check the file itself
+      // TODO: we don't check whether it's a real executable file :/
       if (stat(tcp->opened_filename, &filename_stat) != 0) {
         return;
       }
-      // TODO: we don't check whether it's a real executable file :/
     }
+
     //printf("%s survived\n", tcp->opened_filename);
 
 
@@ -1414,5 +1412,19 @@ void finish_setup_shmat(struct tcb* tcp) {
   assert(tcp->childshm);
 
   tcp->setting_up_shm = 0; // very importante!!!
+}
+
+
+// copy src into dst, redirecting it into cde-root/ if necessary
+// dst should be big enough to hold a full path
+void strcpy_redirected_cderoot(char* dst, char* src) {
+  char* redirected_src = redirect_filename(src);
+  if (redirected_src) {
+    strcpy(dst, redirected_src);
+    free(redirected_src);
+  }
+  else {
+    strcpy(dst, src);
+  }
 }
 
