@@ -84,6 +84,24 @@ void CDE_init_relpaths(void) {
   fclose(relpath_f);
 }
 
+// emulate "mkdir -p" functionality
+// if pop_one is non-zero, then pop last element first
+static void mkdir_recursive(char* fullpath, int pop_one) {
+  struct path* p = str2path(fullpath);
+
+  if (pop_one) {
+    path_pop(p); // ignore filename portion to leave just the dirname
+  }
+
+  int i;
+  for (i = 1; i <= p->depth; i++) {
+    char* dn = path2str(p, i);
+    mkdir(dn, 0777);
+    free(dn);
+  }
+  delete_path(p);
+}
+
 
 // ignore these special paths:
 static int ignore_path(char* filename) {
@@ -285,16 +303,7 @@ static void copy_file_into_cde_root(char* filename) {
       }
     }
 
-    struct path* p = str2path(dst_path);
-    path_pop(p); // ignore filename portion to leave just the dirname
-
-    // now mkdir all directories specified in dst_path
-    int i;
-    for (i = 1; i <= p->depth; i++) {
-      char* dn = path2str(p, i);
-      mkdir(dn, 0777);
-      free(dn);
-    }
+    mkdir_recursive(dst_path, 1);
 
     // finally, 'copy' filename over to dst_path
 
@@ -349,15 +358,7 @@ static void copy_file_into_cde_root(char* filename) {
 
       // ugh, this is getting really really gross, mkdir all dirs stated in
       // symlink_dst_abspath if they don't yet exist
-      struct path* p = str2path(symlink_dst_abspath);
-      path_pop(p); // ignore basename portion to leave just the dirname
-      int i;
-      for (i = 1; i <= p->depth; i++) {
-        char* dn = path2str(p, i);
-        mkdir(dn, 0777);
-        free(dn);
-      }
-      delete_path(p);
+      mkdir_recursive(symlink_dst_abspath, 1);
 
       //printf("  cp %s %s\n", path2, symlink_dst_abspath);
       // copy the target file over to cde-root/
@@ -388,21 +389,10 @@ static void copy_file_into_cde_root(char* filename) {
     // up via strace)
     find_and_copy_possible_dynload_libs(filename);
 
-    delete_path(p);
   }
   else if (S_ISDIR(filename_stat.st_mode)) { // directory
     // do a "mkdir -p filename" after redirecting it into cde-root/
-    struct path* p = str2path(dst_path);
-
-    // now mkdir all directories specified in dst_path
-    int i;
-    for (i = 1; i <= p->depth; i++) {
-      char* dn = path2str(p, i);
-      mkdir(dn, 0777);
-      free(dn);
-    }
-
-    delete_path(p);
+    mkdir_recursive(dst_path, 0);
   }
 
 done:
@@ -981,6 +971,78 @@ void CDE_end_file_rename(struct tcb* tcp) {
       free(filename_tmp);
     }
   }
+}
+
+void CDE_begin_chdir(struct tcb* tcp) {
+  CDE_begin_standard_fileop(tcp, "chdir");
+}
+
+void CDE_end_chdir(struct tcb* tcp) {
+  assert(tcp->opened_filename);
+
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (tcp->u_rval == 0) {
+      char* redirected_path = redirect_filename(tcp->opened_filename);
+      if (redirected_path) {
+        mkdir_recursive(redirected_path, 0);
+        free(redirected_path);
+      }
+    }
+  }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+void CDE_begin_mkdir(struct tcb* tcp) {
+  CDE_begin_standard_fileop(tcp, "mkdir");
+}
+
+void CDE_end_mkdir(struct tcb* tcp) {
+  assert(tcp->opened_filename);
+
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (tcp->u_rval == 0) {
+      char* redirected_path = redirect_filename(tcp->opened_filename);
+      if (redirected_path) {
+        mkdir_recursive(redirected_path, 0);
+        free(redirected_path);
+      }
+    }
+  }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+void CDE_begin_rmdir(struct tcb* tcp) {
+  CDE_begin_standard_fileop(tcp, "rmdir");
+}
+
+void CDE_end_rmdir(struct tcb* tcp) {
+  assert(tcp->opened_filename);
+
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (tcp->u_rval == 0) {
+      char* redirected_path = redirect_filename(tcp->opened_filename);
+      if (redirected_path) {
+        rmdir(redirected_path);
+        free(redirected_path);
+      }
+    }
+  }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
 }
 
 

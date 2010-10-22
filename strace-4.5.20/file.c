@@ -44,6 +44,13 @@ extern void CDE_end_file_link(struct tcb* tcp);
 extern void CDE_begin_file_rename(struct tcb* tcp);
 extern void CDE_end_file_rename(struct tcb* tcp);
 
+extern void CDE_begin_chdir(struct tcb* tcp);
+extern void CDE_end_chdir(struct tcb* tcp);
+extern void CDE_begin_mkdir(struct tcb* tcp);
+extern void CDE_end_mkdir(struct tcb* tcp);
+extern void CDE_begin_rmdir(struct tcb* tcp);
+extern void CDE_end_rmdir(struct tcb* tcp);
+
 
 #define CDE_standard_fileop_macro(tcp, success_type) \
   if (entering(tcp)) { \
@@ -1899,10 +1906,21 @@ sys_pivotroot(struct tcb *tcp)
 int
 sys_chdir(struct tcb *tcp)
 {
+  // pgbovine
+  if (entering(tcp)) {
+    CDE_begin_chdir(tcp);
+  }
+  else {
+    CDE_end_chdir(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 	}
 	return 0;
+  */
 }
 
 static int
@@ -1918,7 +1936,16 @@ decode_mkdir(struct tcb *tcp, int offset)
 int
 sys_mkdir(struct tcb *tcp)
 {
-	return decode_mkdir(tcp, 0);
+  // pgbovine
+  if (entering(tcp)) {
+    CDE_begin_mkdir(tcp);
+  }
+  else {
+    CDE_end_mkdir(tcp);
+  }
+  return 0;
+
+	//return decode_mkdir(tcp, 0);
 }
 
 #ifdef LINUX
@@ -1934,10 +1961,21 @@ sys_mkdirat(struct tcb *tcp)
 int
 sys_rmdir(struct tcb *tcp)
 {
+  // pgbovine
+  if (entering(tcp)) {
+    CDE_begin_rmdir(tcp);
+  }
+  else {
+    CDE_end_rmdir(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 	}
 	return 0;
+  */
 }
 
 int
@@ -1973,7 +2011,6 @@ int
 sys_link(struct tcb *tcp)
 {
   // pgbovine
-  // pgbovine
   if (entering(tcp)) {
     CDE_begin_file_link(tcp);
   }
@@ -1981,7 +2018,6 @@ sys_link(struct tcb *tcp)
     CDE_end_file_link(tcp);
   }
   return 0;
-
 
   /*
 	if (entering(tcp)) {
