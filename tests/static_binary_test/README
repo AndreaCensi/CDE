@@ -1,0 +1,6 @@
+test whether you can run a program compiled as a static binary
+(i.e., one that doesn't use ld-linux.so.2 at run-time)
+
+compile with:
+  gcc -static hello-world-static.c -o hello-world-static
+
