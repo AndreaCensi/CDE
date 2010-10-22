@@ -35,10 +35,8 @@ void path_pop(struct path* p);
 
 static char* redirect_filename(char* filename);
 
-// used as temporary holding spaces for paths, to avoid mallocs
+// used as temporary holding spaces for paths copied from child process
 static char path[MAXPATHLEN + 1];
-static char path2[MAXPATHLEN + 1];
-static char path3[MAXPATHLEN + 1];
 
 // to shut up gcc warnings without going thru #include hell
 extern char* basename(const char *fname);
@@ -55,7 +53,7 @@ static int relpath_map_size = 0;
 
 
 void CDE_init_relpaths(void) {
-  FILE* relpath_f = fopen("cde-root/cde.relpaths", "r");
+  FILE* relpath_f = fopen(CDE_ROOT "/cde.relpaths", "r");
   if (!relpath_f) {
     return;
   }
@@ -83,6 +81,36 @@ void CDE_init_relpaths(void) {
   free(tmp);
   fclose(relpath_f);
 }
+
+
+// useful utility function from ccache codebase
+// http://ccache.samba.org/
+/* Construct a string according to a format. Caller frees. */
+char *
+format(const char *format, ...)
+{
+  va_list ap;
+  char *ptr = NULL;
+
+  va_start(ap, format);
+  EXITIF(vasprintf(&ptr, format, ap) == -1);
+  va_end(ap);
+
+  EXITIF(!*ptr);
+  return ptr;
+}
+
+// prepend "cde-root" to the given path string, assumes that the string
+// starts with '/' (i.e., it's an absolute path)
+// mallocs a new string!
+char* prepend_cderoot(char* path) {
+  assert(IS_ABSPATH(path));
+  char* ret = malloc(CDE_ROOT_LEN + strlen(path) + 1);
+  strcpy(ret, CDE_ROOT);
+  strcat(ret, path);
+  return ret;
+}
+
 
 // emulate "mkdir -p" functionality
 // if pop_one is non-zero, then pop last element first
@@ -134,10 +162,7 @@ static char* realpath_nofollow(char* filename) {
   realpath(dir, path);
   assert(path[0] != '\0');
 
-  char* ret = malloc(strlen(filename) + strlen(path) + 1 + 1);
-  strcpy(ret, path);
-  strcat(ret, "/");
-  strcat(ret, bn);
+  char* ret = format("%s/%s", path, bn);
 
   free(filename_copy);
   return ret;
@@ -242,9 +267,7 @@ static void copy_file_into_cde_root(char* filename) {
   // resolve absolute path to get rid of '..', '.', and other weird symbols
   char* filename_abspath = realpath_nofollow(filename);
 
-  char* dst_path = malloc(strlen(filename_abspath) + strlen("cde-root") + 1);
-  strcpy(dst_path, "cde-root");
-  strcat(dst_path, filename_abspath);
+  char* dst_path = prepend_cderoot(filename_abspath);
 
   // Record an entry in cde-root/cde.relpaths to map the directory
   // names of relative path to the appropriate location within cde-root/.
@@ -277,7 +300,7 @@ static void copy_file_into_cde_root(char* filename) {
       relpath_map_size++;
       assert(relpath_map_size < 50); // bound it for simplicity
 
-      FILE* relpath_f = fopen("cde-root/cde.relpaths", "a");
+      FILE* relpath_f = fopen(CDE_ROOT "/cde.relpaths", "a");
       assert(relpath_f);
 
       // colon-delimited to support paths with spaces in them
@@ -313,7 +336,6 @@ static void copy_file_into_cde_root(char* filename) {
       int len = readlink(filename, path, sizeof path);
       EXITIF(len < 0);
       path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
-
       char* orig_symlink_target = strdup(path);
 
       char* filename_copy = strdup(filename); // dirname() destroys its arg
@@ -327,45 +349,40 @@ static void copy_file_into_cde_root(char* filename) {
       // now path is the realpath() of dir
       assert(path[0] == '/');
 
-      // user path2 as a temporary holding spot
+      char* symlink_target_abspath = NULL;
       // ugh, remember that symlinks can point to both absolute AND
       // relative paths ...
       if (IS_ABSPATH(orig_symlink_target)) {
-        strcpy(path2, orig_symlink_target);
+        symlink_target_abspath = strdup(orig_symlink_target);
       }
       else {
-        strcpy(path2, path);
-        strcat(path2, "/");
-        strcat(path2, orig_symlink_target);
+        symlink_target_abspath = format("%s/%s", path, orig_symlink_target);
       }
+      assert(symlink_target_abspath);
 
-      // use path3 as a temporary holding spot
-      strcpy(path3, "cde-root");
-      strcat(path3, filename_abspath);
+      char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
 
       // create a new identical symlink in cde-root/
-      //printf("symlink(%s, %s)\n", orig_symlink_target, path3);
-      EXITIF(symlink(orig_symlink_target, path3) < 0);
+      //printf("symlink(%s, %s)\n", orig_symlink_target, symlink_loc_in_package);
+      EXITIF(symlink(orig_symlink_target, symlink_loc_in_package) < 0);
 
-      // use path3 as a temporary holding spot (again!)
-      strcpy(path3, "cde-root");
-      strcat(path3, path);
-      strcat(path3, "/");
-      strcat(path3, orig_symlink_target);
-
-      // ok, let's get the absolute path of path3 without any '..' or '.' funniness
-      char* symlink_dst_abspath = realpath_nofollow(path3);
+      char* tmp = prepend_cderoot(symlink_target_abspath);
+      // ok, let's get the absolute path without any '..' or '.' funniness
+      char* symlink_dst_abspath = realpath_nofollow(tmp);
+      free(tmp);
 
       // ugh, this is getting really really gross, mkdir all dirs stated in
       // symlink_dst_abspath if they don't yet exist
       mkdir_recursive(symlink_dst_abspath, 1);
 
-      //printf("  cp %s %s\n", path2, symlink_dst_abspath);
+      //printf("  cp %s %s\n", symlink_target_abspath, symlink_dst_abspath);
       // copy the target file over to cde-root/
-      if ((link(path2, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
-        copy_file(path2, symlink_dst_abspath);
+      if ((link(symlink_target_abspath, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
+        copy_file(symlink_target_abspath, symlink_dst_abspath);
       }
 
+      free(symlink_loc_in_package);
+      free(symlink_target_abspath);
       free(symlink_dst_abspath);
       free(orig_symlink_target);
       free(filename_copy);
@@ -497,17 +514,14 @@ done:
     char* dn = dirname(filename_copy);
 
     for (i = 0; i < libs_to_check_ind; i++) {
-      static char lib_fullpath[4096];
-      strcpy(lib_fullpath, dn);
-      strcat(lib_fullpath, "/");
-      strcat(lib_fullpath, libs_to_check[i]);
-
+      char* lib_fullpath = format("%s/%s", dn, libs_to_check[i]);
       // if the target library exists, then copy it into our package
       struct stat st;
       if (stat(lib_fullpath, &st) == 0) {
         //printf("%s %s\n", filename, lib_fullpath);
         copy_file_into_cde_root(lib_fullpath);
       }
+      free(lib_fullpath);
     }
 
     free(filename_copy);
@@ -638,10 +652,7 @@ static char* redirect_filename(char* filename) {
   if (!file_is_within_pwd(filename)) {
     if (IS_ABSPATH(filename)) {
       // easy case: absolute path, just do a plain redirect :)
-      char* dst_path = malloc(strlen(filename) + strlen("cde-root") + 1);
-      strcpy(dst_path, "cde-root");
-      strcat(dst_path, filename);
-      return dst_path;
+      return prepend_cderoot(filename);
     }
     else {
       // hard case: relative path ... consult relpath_map to do redirection
@@ -664,10 +675,7 @@ static char* redirect_filename(char* filename) {
       // if we can't find the path in relpath_map, then we're screwed!!!
       assert(found && dst_dir);
 
-      char* dst_path = malloc(strlen(dst_dir) + strlen(bn) + 1 + 1);
-      strcpy(dst_path, dst_dir);
-      strcat(dst_path, "/");
-      strcat(dst_path, bn);
+      char* dst_path = format("%s/%s", dst_dir, bn);
 
       free(rel_filename_copy);
       return dst_path;
@@ -758,9 +766,7 @@ void CDE_begin_execve(struct tcb* tcp) {
     // TODO: copy-and-paste alert
     if (IS_ABSPATH(tcp->opened_filename)) {
       // for an absolute path, check the version within cde-root/
-      char* dst_path = malloc(strlen(tcp->opened_filename) + strlen("cde-root") + 1);
-      strcpy(dst_path, "cde-root");
-      strcat(dst_path, tcp->opened_filename);
+      char* dst_path = prepend_cderoot(tcp->opened_filename);
 
       if (stat(dst_path, &filename_stat) != 0) {
         free(dst_path);
@@ -815,8 +821,8 @@ void CDE_begin_execve(struct tcb* tcp) {
         Note that we only need to do this if we're in CDE_exec_mode */
 
     char* base = (char*)tcp->localshm;
-    strcpy(base, "cde-root/ld-linux.so.2");
-    int offset = strlen("cde-root/ld-linux.so.2") + 1;
+    strcpy(base, CDE_ROOT "/ld-linux.so.2");
+    int offset = strlen(CDE_ROOT "/ld-linux.so.2") + 1;
     char** new_argv = (char**)(base + offset);
 
     // really subtle, these addresses should be in the CHILD's address space,

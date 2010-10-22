@@ -560,9 +560,9 @@ startup_child (char **argv)
     // TODO: can override other environment variables here too
     if (CDE_exec_mode) {
       // load environment variables from "cde-root/cde.environment" file
-      FILE* envF = fopen("cde-root/cde.environment", "r");
+      FILE* envF = fopen(CDE_ROOT "/cde.environment", "r");
       if (!envF) {
-        perror("cde-root/cde.environment");
+        perror(CDE_ROOT "/cde.environment");
         cleanup();
         exit(1);
       }
@@ -626,10 +626,10 @@ startup_child (char **argv)
     }
     else {
       // save current value of selected environment vars to "cde-root/cde.environment" file
-      mkdir("cde-root", 0777);
-      FILE* envF = fopen("cde-root/cde.environment", "w");
+      mkdir(CDE_ROOT, 0777);
+      FILE* envF = fopen(CDE_ROOT "/cde.environment", "w");
       if (!envF) {
-        perror("cde-root/cde.environment");
+        perror(CDE_ROOT "/cde.environment");
         cleanup();
         exit(1);
       }
@@ -678,7 +678,7 @@ startup_child (char **argv)
       if (CDE_exec_mode) {
         // use "cde-root/" prefix to find the version of executable
         // that's in the CDE package
-        strcpy(path_to_search, "cde-root");
+        strcpy(path_to_search, CDE_ROOT);
         strcat(path_to_search, pathname);
       }
       else {
@@ -849,9 +849,9 @@ main(int argc, char *argv[])
 
       copy_file(argv[0], "cde-exec");
 
-      mkdir("cde-root", 0777);
+      mkdir(CDE_ROOT, 0777);
       // also copy over dynamic linker to pwd to include it in package
-      copy_file("/lib/ld-linux.so.2", "cde-root/ld-linux.so.2");
+      copy_file("/lib/ld-linux.so.2", CDE_ROOT "/ld-linux.so.2");
     }
 
     // pgbovine - append the command line to cde.log in pwd, so that the
@@ -869,7 +869,7 @@ main(int argc, char *argv[])
     }
 
     // start over with cde.relpaths so that we don't multiple-append
-    unlink("cde-root/cde.relpaths");
+    unlink(CDE_ROOT "/cde.relpaths");
   }
 
   // pgbovine - allow most slutty of permissions for new files/directories

@@ -368,6 +368,10 @@ struct tcb {
   char setting_up_shm; // 1 if we're in the process of setting up shared memory
 };
 
+// pgbovine
+#define CDE_ROOT "cde-root"
+#define CDE_ROOT_LEN 8
+
 /* TCB flags */
 #define TCB_STARTUP	00001	/* We have just begun ptracing this process */
 #define TCB_INUSE	00002	/* This table entry is in use */
