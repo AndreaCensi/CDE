@@ -306,7 +306,8 @@ EXTRA_DIST = $(man_MANS) errnoent.sh signalent.sh syscallent.sh ioctlsort.c \
 @LINUX_TRUE@@MAINTAINER_MODE_TRUE@BUILT_SOURCES = $(ioctlent_h)
 all: $(BUILT_SOURCES) config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
-	mv strace cde # pgbovine
+	mv strace cde   # pgbovine
+	cp cde cde-exec # pgbovine
 
 .SUFFIXES:
 .SUFFIXES: .c .o .obj
@@ -397,6 +398,7 @@ uninstall-binPROGRAMS:
 	cd "$(DESTDIR)$(bindir)" && rm -f $$files
 
 clean-binPROGRAMS:
+	rm -f cde cde-exec # pgbovine
 	-test -z "$(bin_PROGRAMS)" || rm -f $(bin_PROGRAMS)
 strace$(EXEEXT): $(strace_OBJECTS) $(strace_DEPENDENCIES) 
 	@rm -f strace$(EXEEXT)
