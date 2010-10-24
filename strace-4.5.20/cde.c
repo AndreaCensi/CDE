@@ -1157,6 +1157,34 @@ void CDE_end_file_link(struct tcb* tcp) {
   }
 }
 
+void CDE_begin_file_symlink(struct tcb* tcp) {
+  //printf("CDE_begin_file_symlink\n");
+  if (CDE_exec_mode) {
+    modify_syscall_two_args(tcp);
+  }
+}
+
+void CDE_end_file_symlink(struct tcb* tcp) {
+  if (CDE_exec_mode) {
+    // empty
+  }
+  else {
+    if (tcp->u_rval == 0) {
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
+      char* oldname = strdup(path);
+
+      EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
+      char* newname_redirected = redirect_filename(path);
+
+      symlink(oldname, newname_redirected);
+
+      free(oldname);
+      free(newname_redirected);
+    }
+  }
+}
+
+
 void CDE_begin_file_rename(struct tcb* tcp) {
   if (CDE_exec_mode) {
     modify_syscall_two_args(tcp);

@@ -41,6 +41,8 @@ extern void CDE_begin_file_unlink(struct tcb* tcp);
 
 extern void CDE_begin_file_link(struct tcb* tcp);
 extern void CDE_end_file_link(struct tcb* tcp);
+extern void CDE_begin_file_symlink(struct tcb* tcp);
+extern void CDE_end_file_symlink(struct tcb* tcp);
 extern void CDE_begin_file_rename(struct tcb* tcp);
 extern void CDE_end_file_rename(struct tcb* tcp);
 
@@ -2089,12 +2091,23 @@ sys_unlinkat(struct tcb *tcp)
 int
 sys_symlink(struct tcb *tcp)
 {
+  // pgbovine
+  if (entering(tcp)) {
+    CDE_begin_file_symlink(tcp);
+  }
+  else {
+    CDE_end_file_symlink(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		printpath(tcp, tcp->u_arg[0]);
 		tprintf(", ");
 		printpath(tcp, tcp->u_arg[1]);
 	}
 	return 0;
+  */
 }
 
 #ifdef LINUX

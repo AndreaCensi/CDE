@@ -914,7 +914,7 @@ main(int argc, char *argv[])
 
   // pgbovine - only track selected system calls
   // qualify actually mutates this string, so we can't pass in a constant
-  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64,oldstat,oldlstat,link,unlink,rename,access,creat,chmod,chown,chown32,lchown,lchown32,readlink,utime,truncate,truncate64,chdir,mkdir,rmdir,getcwd,uname");
+  char* tmp = strdup("trace=open,execve,stat,stat64,lstat,lstat64,oldstat,oldlstat,link,symlink,unlink,rename,access,creat,chmod,chown,chown32,lchown,lchown32,readlink,utime,truncate,truncate64,chdir,mkdir,rmdir,getcwd,uname");
 	qualify(tmp);
   free(tmp);
 
