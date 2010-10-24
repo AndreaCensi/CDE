@@ -34,6 +34,7 @@ void delete_path(struct path *path);
 void path_pop(struct path* p);
 
 static char* redirect_filename(char* filename);
+static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 
 // used as temporary holding spaces for paths copied from child process
 static char path[MAXPATHLEN + 1];
@@ -1062,6 +1063,39 @@ void CDE_end_execve(struct tcb* tcp) {
 
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
+}
+
+
+#include <sys/utsname.h>
+
+void CDE_end_uname(struct tcb* tcp) {
+  struct utsname uname;
+
+  if (CDE_exec_mode) {
+    // if cde-root/cde.uname exists, read cached copy and override
+    // return value with it; otherwise don't do anything
+    int inF = open(CDE_ROOT "/cde.uname", O_RDONLY);
+    if (inF >= 0) {
+      read(inF, &uname, sizeof(uname));
+      close(inF);
+
+      //printf("saved uname.release='%s'\n", uname.release);
+      //strcpy(uname.release, "ooga booga"); // for testing :)
+      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], (char*)&uname, sizeof uname);
+    }
+  }
+  else {
+    EXITIF(umove(tcp, tcp->u_arg[0], &uname) < 0);
+    //printf("uname.release='%s'\n", uname.release);
+
+    // serialize the bytes of uname LITERALLY to cde-root/cde.uname
+    // (overriding previous contents).  we don't have to care about big
+    // vs. little endian since CDE isn't portably across CPU
+    // architectures anyways ;)
+    int outF = open(CDE_ROOT "/cde.uname", O_WRONLY | O_CREAT, 0777);
+    write(outF, &uname, sizeof(uname));
+    close(outF);
+  }
 }
 
 
