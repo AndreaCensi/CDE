@@ -138,6 +138,9 @@ static int ignore_path(char* filename) {
   //
   // .Xauthority is used for X11 authentication via ssh, so we need to
   // use the REAL version and not the one in cde-root/
+  //
+  // TODO: /proc/sys/kernel/osrelease is sometimes used instead of uname
+  //       syscall, so perhaps don't ignore it
   if ((strncmp(filename, "/dev/", 5) == 0) ||
       (strncmp(filename, "/proc/", 6) == 0) ||
       (strcmp(basename(filename), ".Xauthority") == 0)) {
