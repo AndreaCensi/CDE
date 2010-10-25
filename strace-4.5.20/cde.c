@@ -399,7 +399,7 @@ static void copy_file_into_cde_root(char* filename) {
       strcat(tmp, orig_symlink_target);
 
       // create a new identical symlink in cde-root/
-      printf("symlink(%s, %s), symlink_target_abspath=%s\n", tmp, symlink_loc_in_package, symlink_target_abspath);
+      //printf("symlink(%s, %s)\n", tmp, symlink_loc_in_package);
       symlink(tmp, symlink_loc_in_package);
     }
     else {
@@ -416,7 +416,7 @@ static void copy_file_into_cde_root(char* filename) {
     char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath);
     char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
     //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
-    printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
+    //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
     free(symlink_dst_tmp_path);
 
     // ugh, this is getting really really gross, mkdir all dirs stated in
@@ -436,7 +436,6 @@ static void copy_file_into_cde_root(char* filename) {
       // libraries (e.g., those for other CPU types that we can't pick
       // up via strace)
       find_and_copy_possible_dynload_libs(filename);
-
     }
     else if (S_ISDIR(filename_stat.st_mode)) { // symlink to directory
       // hmmm, should we just leave this empty?
@@ -1771,6 +1770,7 @@ void CDE_end_getcwd(struct tcb* tcp) {
 void CDE_create_path_symlink_dirs() {
   char *p;
   int m, n;
+  struct stat st;
 
   for (p = getenv("PATH"); p && *p; p += m) {
     if (strchr(p, ':')) {
@@ -1785,14 +1785,40 @@ void CDE_create_path_symlink_dirs() {
     path[n] = '\0';
 
     // this will NOT follow the symlink ...
-    struct stat filename_stat;
-    if (lstat(path, &filename_stat) == 0) {
-      char is_symlink = S_ISLNK(filename_stat.st_mode);
+    if (lstat(path, &st) == 0) {
+      char is_symlink = S_ISLNK(st.st_mode);
       if (is_symlink) {
         char* tmp = strdup(path);
         copy_file_into_cde_root(tmp);
         free(tmp);
       }
+    }
+  }
+
+  // also, this is hacky, but also check /lib and /usr/lib to see
+  // whether they're symlinks.  ld-linux.so.2 will likely try to look
+  // for libraries in those places, but they're not in any convenient
+  // environment variable
+
+  strcpy(path, "/lib");
+  // this will NOT follow the symlink ...
+  if (lstat(path, &st) == 0) {
+    char is_symlink = S_ISLNK(st.st_mode);
+    if (is_symlink) {
+      char* tmp = strdup(path);
+      copy_file_into_cde_root(tmp);
+      free(tmp);
+    }
+  }
+
+  strcpy(path, "/usr/lib");
+  // this will NOT follow the symlink ...
+  if (lstat(path, &st) == 0) {
+    char is_symlink = S_ISLNK(st.st_mode);
+    if (is_symlink) {
+      char* tmp = strdup(path);
+      copy_file_into_cde_root(tmp);
+      free(tmp);
     }
   }
 }
