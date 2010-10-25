@@ -44,6 +44,12 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 // used as temporary holding spaces for paths copied from child process
 static char path[MAXPATHLEN + 1];
 
+// the pwd at the START of execution
+// (the target program might alter it later with a chdir syscall!)
+char starting_pwd[MAXPATHLEN + 1];
+// current pwd, keeping up to date with chdir syscalls
+char child_current_pwd[MAXPATHLEN + 1];
+
 // to shut up gcc warnings without going thru #include hell
 extern char* basename(const char *fname);
 extern char *dirname(char *path);
@@ -155,7 +161,9 @@ static int ignore_path(char* filename) {
   return 0;
 }
 
-// gets the absolute path of filename, WITHOUT following any symlinks
+// gets the absolute path of filename relative to child_current_pwd
+// (for a relative path), WITHOUT following any symlinks
+//
 // mallocs a new string
 // WARNING: clobbers 'path' static var!!!
 static char* realpath_nofollow(char* filename) {
@@ -164,68 +172,83 @@ static char* realpath_nofollow(char* filename) {
   // relative paths will resolve to different absolute paths, eek!
   assert(!CDE_exec_mode);
 
-  char* bn = basename(filename); // doesn't destroy its arg
+  char* ret = NULL;
+  if (IS_ABSPATH(filename)) {
+    char* bn = basename(filename); // doesn't destroy its arg
 
-  char* filename_copy = strdup(filename); // dirname() destroys its arg
-  char* dir = dirname(filename_copy);
-  path[0] = '\0';
-  realpath(dir, path);
-  assert(path[0] != '\0');
+    char* filename_copy = strdup(filename); // dirname() destroys its arg
+    char* dir = dirname(filename_copy);
+    path[0] = '\0';
+    realpath(dir, path);
+    assert(path[0] != '\0');
 
-  char* ret = format("%s/%s", path, bn);
+    ret = format("%s/%s", path, bn);
+    free(filename_copy);
+  }
+  else {
+    // for relative links, find them with respect to child_current_pwd
+    char* tmp = format("%s/%s", child_current_pwd, filename);
+    char* bn = basename(tmp); // doesn't destroy its arg
 
-  free(filename_copy);
+    char* tmp_copy = strdup(tmp); // dirname() destroys its arg
+    char* dir = dirname(tmp_copy);
+    path[0] = '\0';
+    realpath(dir, path);
+    assert(path[0] != '\0');
+
+    ret = format("%s/%s", path, bn);
+    free(tmp_copy);
+    free(tmp);
+  }
+
+  assert(ret);
   return ret;
 }
 
 
-// return 1 iff the absolute path of filename is within pwd
-static int file_is_within_pwd(char* filename) {
+// return 1 iff the absolute path of filename is within the ORIGINAL pwd
+static int file_is_within_starting_pwd(char* filename) {
+  char* path_to_check = NULL;
 
   if (IS_ABSPATH(filename)) {
-    // grab the TRUE system's pwd
-    getcwd(path, sizeof path);
-    char* pwd = path;
-
-    // just do a substring comparison
-    char* filename_copy = strdup(filename);
-    char* dn = dirname(filename_copy);
-
-    int dn_len = strlen(dn);
-    int pwd_len = strlen(pwd);
-
-    // special case hack - if dn ends with '/.', then take its dirname
-    // AGAIN to get rid of this annoyance :)
-    while ((dn_len >= 2) && dn[dn_len - 2] == '/' && dn[dn_len - 1] == '.') {
-      dn = dirname(dn);
-      dn_len = strlen(dn);
-    }
-
-    char is_within_pwd = 0;
-
-    //printf("file_is_within_pwd %s %s\n", dn, pwd);
-    if ((pwd_len <= dn_len) && strncmp(dn, pwd, pwd_len) == 0) {
-      is_within_pwd = 1;
-    }
-
-    free(filename_copy);
-    return is_within_pwd;
+    path[0] = '\0';
+    realpath(filename, path);
+    assert(path[0] != '\0');
+    path_to_check = strdup(path);
   }
   else {
-    // if you're given a relative path, then a super-simple check is if
-    // it starts with '..' (or a bunch of '.' followed by a '..')
-    // TODO: this probably doesn't handle all cases; after all, we're
-    // not going for security here :)
-    if (strncmp(filename, "..", 2) == 0) {
-      return 0;
-    }
-    else {
-      return 1;
-    }
+    // note that the target program might have done a chdir, so we need to handle that ;)
+    char* tmp = format("%s/%s", child_current_pwd, filename);
+    path[0] = '\0';
+    realpath(tmp, path);
+    assert(path[0] != '\0');
+    path_to_check = strdup(path);
+    free(tmp);
   }
 
-  assert(0); // shouldn't reach here
-  return 0;
+  // just do a substring comparison against starting_pwd
+  char* path_to_check_copy = strdup(path_to_check);
+  char* dn = dirname(path_to_check_copy);
+
+  int dn_len = strlen(dn);
+  int pwd_len = strlen(starting_pwd);
+
+  // special case hack - if dn ends with '/.', then take its dirname
+  // AGAIN to get rid of this annoyance :)
+  while ((dn_len >= 2) && dn[dn_len - 2] == '/' && dn[dn_len - 1] == '.') {
+    dn = dirname(dn);
+    dn_len = strlen(dn);
+  }
+
+  char is_within_pwd = 0;
+
+  if ((pwd_len <= dn_len) && strncmp(dn, starting_pwd, pwd_len) == 0) {
+    is_within_pwd = 1;
+  }
+
+  free(path_to_check_copy);
+  free(path_to_check);
+  return is_within_pwd;
 }
 
 
@@ -266,29 +289,28 @@ static void copy_file_into_cde_root(char* filename) {
   }
 
   // don't do anything for files inside of pwd :)
-  if (file_is_within_pwd(filename)) {
+  if (file_is_within_starting_pwd(filename)) {
     return;
   }
+
+  // resolve absolute path relative to child_current_pwd and
+  // get rid of '..', '.', and other weird symbols
+  char* filename_abspath = realpath_nofollow(filename);
+  char* dst_path = prepend_cderoot(filename_abspath);
 
 
   // this will NOT follow the symlink ...
   struct stat filename_stat;
-  EXITIF(lstat(filename, &filename_stat));
+  EXITIF(lstat(filename_abspath, &filename_stat));
   char is_symlink = S_ISLNK(filename_stat.st_mode);
 
   if (is_symlink) {
     // this will follow the symlink ...
-    EXITIF(stat(filename, &filename_stat));
+    EXITIF(stat(filename_abspath, &filename_stat));
   }
-
 
   // by now, filename_stat contains the info for the actual target file,
   // NOT a symlink to it
-
-  // resolve absolute path to get rid of '..', '.', and other weird symbols
-  char* filename_abspath = realpath_nofollow(filename);
-
-  char* dst_path = prepend_cderoot(filename_abspath);
 
   // Record an entry in cde-root/cde.relpaths to map the directory
   // names of relative path to the appropriate location within cde-root/.
@@ -351,12 +373,12 @@ static void copy_file_into_cde_root(char* filename) {
   }
 
 
-  // finally, 'copy' filename over to dst_path
+  // finally, 'copy' filename_abspath over to dst_path
 
   // if it's a symlink, copy both it and its target
   if (is_symlink) {
     // target file must exist, so let's resolve its name
-    int len = readlink(filename, path, sizeof path);
+    int len = readlink(filename_abspath, path, sizeof path);
     EXITIF(len < 0);
     path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
     char* orig_symlink_target = strdup(path);
@@ -458,15 +480,15 @@ static void copy_file_into_cde_root(char* filename) {
       //
       // EEXIST means the file already exists, which isn't
       // really a hard link failure ...
-      if ((link(filename, dst_path) != 0) && (errno != EEXIST)) {
-        copy_file(filename, dst_path);
+      if ((link(filename_abspath, dst_path) != 0) && (errno != EEXIST)) {
+        copy_file(filename_abspath, dst_path);
       }
 
       // if it's a shared library, then heuristically try to grep
       // through it to find whether it might dynamically load any other
       // libraries (e.g., those for other CPU types that we can't pick
       // up via strace)
-      find_and_copy_possible_dynload_libs(filename);
+      find_and_copy_possible_dynload_libs(filename_abspath);
     }
     else if (S_ISDIR(filename_stat.st_mode)) { // directory or symlink to directory
       // do a "mkdir -p filename" after redirecting it into cde-root/
@@ -711,7 +733,7 @@ static char* redirect_filename(char* filename) {
     return NULL;
   }
 
-  if (!file_is_within_pwd(filename)) {
+  if (!file_is_within_starting_pwd(filename)) {
     if (IS_ABSPATH(filename)) {
       // easy case: absolute path, just do a plain redirect :)
       return prepend_cderoot(filename);
@@ -824,7 +846,11 @@ void CDE_begin_execve(struct tcb* tcp) {
 
   //printf("%s CDE_begin_execve\n", tcp->opened_filename);
 
-  char* redirected_path = redirect_filename(tcp->opened_filename);
+  char* redirected_path = NULL;
+  if (CDE_exec_mode) {
+    redirected_path = redirect_filename(tcp->opened_filename);
+  }
+
   char* path_to_executable = NULL;
   if (redirected_path) {
     // TODO: we don't check whether it's a real executable file :/
@@ -1091,7 +1117,10 @@ void CDE_begin_execve(struct tcb* tcp) {
   }
 
 done:
-  free(redirected_path); // don't free until we no longer need path_to_executable
+  if (redirected_path) {
+    free(redirected_path);
+  }
+
   if (script_command) {
     free(script_command);
   }
@@ -1224,11 +1253,13 @@ void CDE_end_file_symlink(struct tcb* tcp) {
       char* oldname = strdup(path);
 
       EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
-      char* newname_redirected = redirect_filename(path);
+      char* newname = strdup(path);
+      char* newname_redirected = redirect_filename(newname);
 
       symlink(oldname, newname_redirected);
 
       free(oldname);
+      free(newname);
       free(newname_redirected);
     }
   }
@@ -1281,6 +1312,13 @@ void CDE_end_chdir(struct tcb* tcp) {
         mkdir_recursive(redirected_path, 0);
         free(redirected_path);
       }
+
+      // update child_current_pwd
+      path[0] = '\0';
+      realpath(tcp->opened_filename, path);
+      assert(path[0] != '\0');
+      strcpy(child_current_pwd, path);
+      //printf("  chdir %s\n", child_current_pwd);
     }
   }
 
@@ -1299,12 +1337,12 @@ void CDE_end_mkdir(struct tcb* tcp) {
     // empty
   }
   else {
-    if (tcp->u_rval == 0) {
-      char* redirected_path = redirect_filename(tcp->opened_filename);
-      if (redirected_path) {
-        mkdir_recursive(redirected_path, 0);
-        free(redirected_path);
-      }
+    // always mkdir even if the call fails
+    // (e.g., because the directory already exists)
+    char* redirected_path = redirect_filename(tcp->opened_filename);
+    if (redirected_path) {
+      mkdir_recursive(redirected_path, 0);
+      free(redirected_path);
     }
   }
 

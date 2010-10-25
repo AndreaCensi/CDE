@@ -1,3 +1,7 @@
 import os
 
-os.mkdir('/tmp/testdir')
+try:
+  os.mkdir('/tmp/testdir')
+except OSError:
+  pass
+
