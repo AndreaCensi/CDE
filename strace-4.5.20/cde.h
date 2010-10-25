@@ -15,7 +15,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define _GNU_SOURCE // for vasprintf
+//#define _GNU_SOURCE // for vasprintf (now we include _GNU_SOURCE in Makefile)
 #include <stdio.h>
 
 #include <stdlib.h>

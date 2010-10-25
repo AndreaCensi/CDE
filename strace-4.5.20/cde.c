@@ -157,6 +157,7 @@ static int ignore_path(char* filename) {
 
 // gets the absolute path of filename, WITHOUT following any symlinks
 // mallocs a new string
+// WARNING: clobbers 'path' static var!!!
 static char* realpath_nofollow(char* filename) {
   // only call this function when NOT in CDE_exec_mode, since when we're
   // in CDE_exec_mode, we're likely on someone else's machine, so
@@ -330,7 +331,7 @@ static void copy_file_into_cde_root(char* filename) {
   }
 
 
-  if (S_ISREG(filename_stat.st_mode)) { // regular file
+  if (S_ISREG(filename_stat.st_mode)) { // regular file or symlink
 
     // lazy optimization to avoid redundant copies ...
     struct stat dst_path_stat;
@@ -366,27 +367,53 @@ static void copy_file_into_cde_root(char* filename) {
       // now path is the realpath() of dir
       assert(path[0] == '/');
 
+      char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
+
       char* symlink_target_abspath = NULL;
       // ugh, remember that symlinks can point to both absolute AND
       // relative paths ...
       if (IS_ABSPATH(orig_symlink_target)) {
         symlink_target_abspath = strdup(orig_symlink_target);
+
+        // this is sort of tricky.  we need to insert in a bunch of ../
+        // to bring the directory BACK UP to cde-root, and then we need
+        // to insert in the original absolute path, in order to make the
+        // symlink in the CDE package a RELATIVE path starting from
+        // the cde-root/ base directory
+        struct path* p = str2path(path);
+        static char tmp[MAXPATHLEN];
+        // TODO: this probably doesn't work perfectly, maybe fails on '/' dir
+        if (p->depth > 0) {
+          strcpy(tmp, "..");
+          int i;
+          for (i = 1; i < p->depth; i++) {
+            strcat(tmp, "/..");
+          }
+        }
+        delete_path(p);
+
+        strcat(tmp, orig_symlink_target);
+
+        // create a new identical symlink in cde-root/
+        //printf("symlink(%s, %s)\n", tmp, symlink_loc_in_package);
+        EXITIF(symlink(tmp, symlink_loc_in_package) < 0);
       }
       else {
         symlink_target_abspath = format("%s/%s", path, orig_symlink_target);
+
+        // create a new identical symlink in cde-root/
+        //printf("symlink(%s, %s)\n", orig_symlink_target, symlink_loc_in_package);
+        EXITIF(symlink(orig_symlink_target, symlink_loc_in_package) < 0);
       }
       assert(symlink_target_abspath);
 
-      char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
-
-      // create a new identical symlink in cde-root/
-      //printf("symlink(%s, %s)\n", orig_symlink_target, symlink_loc_in_package);
-      EXITIF(symlink(orig_symlink_target, symlink_loc_in_package) < 0);
-
-      char* tmp = prepend_cderoot(symlink_target_abspath);
       // ok, let's get the absolute path without any '..' or '.' funniness
-      char* symlink_dst_abspath = realpath_nofollow(tmp);
-      free(tmp);
+      // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
+      char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath);
+      char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
+      //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
+      //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
+      free(symlink_dst_tmp_path);
 
       // ugh, this is getting really really gross, mkdir all dirs stated in
       // symlink_dst_abspath if they don't yet exist
