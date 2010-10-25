@@ -146,6 +146,12 @@ static void mkdir_recursive(char* fullpath, int pop_one) {
 
 // ignore these special paths:
 static int ignore_path(char* filename) {
+  // sometimes you will get a BOGUS empty filename ... in that case,
+  // simply ignore it (this might hide some true errors, though!!!)
+  if (filename[0] == '\0') {
+    return 1;
+  }
+
   // /dev and /proc are special system directories with fake files
   //
   // .Xauthority is used for X11 authentication via ssh, so we need to
@@ -1733,9 +1739,7 @@ void strcpy_redirected_cderoot(char* dst, char* src) {
 // malloc a new string from child
 static char* strcpy_from_child(struct tcb* tcp, long addr) {
   char path[MAXPATHLEN + 1];
-  path[0] = '\0';
   EXITIF(umovestr(tcp, addr, sizeof path, path) < 0);
-  assert(path[0] != '\0');
   return strdup(path);
 }
 
