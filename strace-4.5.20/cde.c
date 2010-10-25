@@ -252,6 +252,9 @@ void copy_file(char* src_filename, char* dst_filename) {
   close(outF);
 }
 
+// this is the meaty and super-complicated function that copies a file
+// into its respective location within cde-root/
+//
 // if filename is a symlink, then copy both it AND its target into cde-root
 static void copy_file_into_cde_root(char* filename) {
   assert(filename);
@@ -392,13 +395,12 @@ static void copy_file_into_cde_root(char* filename) {
         }
       }
       else {
-        strcpy(tmp, ".");
+        strcpy(tmp, "."); // simply use '.' if there are no nesting layers
       }
       delete_path(p);
 
       strcat(tmp, orig_symlink_target);
 
-      // create a new identical symlink in cde-root/
       //printf("symlink(%s, %s)\n", tmp, symlink_loc_in_package);
       symlink(tmp, symlink_loc_in_package);
     }
@@ -419,12 +421,12 @@ static void copy_file_into_cde_root(char* filename) {
     //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
     free(symlink_dst_tmp_path);
 
-    // ugh, this is getting really really gross, mkdir all dirs stated in
-    // symlink_dst_abspath if they don't yet exist
-    mkdir_recursive(symlink_dst_abspath, 1);
-
 
     if (S_ISREG(filename_stat.st_mode)) { // symlink to regular file
+      // ugh, this is getting really really gross, mkdir all dirs stated in
+      // symlink_dst_abspath if they don't yet exist
+      mkdir_recursive(symlink_dst_abspath, 1);
+
       //printf("  cp %s %s\n", symlink_target_abspath, symlink_dst_abspath);
       // copy the target file over to cde-root/
       if ((link(symlink_target_abspath, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
@@ -438,7 +440,7 @@ static void copy_file_into_cde_root(char* filename) {
       find_and_copy_possible_dynload_libs(filename);
     }
     else if (S_ISDIR(filename_stat.st_mode)) { // symlink to directory
-      // hmmm, should we just leave this empty?
+      // hmmm, should we just leave this empty for now?
     }
 
     free(symlink_loc_in_package);
