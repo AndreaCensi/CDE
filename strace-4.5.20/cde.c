@@ -217,37 +217,39 @@ static int file_is_within_starting_pwd(char* filename) {
   char* path_to_check = NULL;
 
   if (IS_ABSPATH(filename)) {
-    path_to_check = realpath_strdup(filename);
+    path_to_check = strdup(filename);
   }
   else {
     // note that the target program might have done a chdir, so we need to handle that ;)
-    char* tmp = format("%s/%s", child_current_pwd, filename);
-    path_to_check = realpath_strdup(tmp);
-    free(tmp);
+    path_to_check = format("%s/%s", child_current_pwd, filename);
   }
+  assert(path_to_check);
 
   // just do a substring comparison against starting_pwd
   char* path_to_check_copy = strdup(path_to_check);
   char* dn = dirname(path_to_check_copy);
+  char* dn_realpath = realpath_strdup(dn);
 
-  int dn_len = strlen(dn);
+  int dn_len = strlen(dn_realpath);
   int pwd_len = strlen(starting_pwd);
 
-  // special case hack - if dn ends with '/.', then take its dirname
+  // special case hack - if dn_realpath ends with '/.', then take its dirname
   // AGAIN to get rid of this annoyance :)
-  while ((dn_len >= 2) && dn[dn_len - 2] == '/' && dn[dn_len - 1] == '.') {
-    dn = dirname(dn);
-    dn_len = strlen(dn);
+  while ((dn_len >= 2) &&
+          dn_realpath[dn_len - 2] == '/' &&
+          dn_realpath[dn_len - 1] == '.') {
+    dn_realpath = dirname(dn_realpath);
+    dn_len = strlen(dn_realpath);
   }
 
   char is_within_pwd = 0;
-
-  if ((pwd_len <= dn_len) && strncmp(dn, starting_pwd, pwd_len) == 0) {
+  if ((pwd_len <= dn_len) && strncmp(dn_realpath, starting_pwd, pwd_len) == 0) {
     is_within_pwd = 1;
   }
 
   free(path_to_check_copy);
   free(path_to_check);
+  free(dn_realpath);
   return is_within_pwd;
 }
 
@@ -814,6 +816,7 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
   assert(tcp->opened_filename);
  
   if (CDE_exec_mode) {
+    //printf("end %s %s (%d)\n", syscall_name, tcp->opened_filename, tcp->u_rval);
     // empty
   }
   else {
@@ -1287,7 +1290,9 @@ void CDE_end_chdir(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
   if (CDE_exec_mode) {
-    // empty
+    // TODO: update child_current_pwd (taking into account path
+    // differences on guest machine)
+    //printf("CDE_end_chdir %s\n", tcp->opened_filename);
   }
   else {
     if (tcp->u_rval == 0) {
@@ -1810,6 +1815,10 @@ void CDE_end_getcwd(struct tcb* tcp) {
       // CDE_end_chdir to update child_current_pwd
       char* saved_pwd = getenv("PWD");
       memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], saved_pwd, strlen(saved_pwd) + 1);
+
+      //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
+      //printf("CDE_end_getcwd %s\n", tmp);
+      //free(tmp);
     }
     else {
     }
