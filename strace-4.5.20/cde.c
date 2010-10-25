@@ -1,5 +1,10 @@
 #include "cde.h"
 
+// This forces gcc to use an older version of realpath from glibc 2.0,
+// to maximize backwards compatibility
+// See: http://www.trevorpounds.com/blog/?p=103
+__asm__(".symver realpath,realpath@GLIBC_2.0");
+
 // 1 if we are executing code in a CDE package,
 // 0 for tracing regular execution
 char CDE_exec_mode;

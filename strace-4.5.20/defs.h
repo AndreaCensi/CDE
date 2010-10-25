@@ -78,7 +78,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <ctype.h>
+//#include <ctype.h> // pgbovine - this eliminates the glibc 2.3 dependency!!!
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
