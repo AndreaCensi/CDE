@@ -621,7 +621,7 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
     return;
   }
 
-  //printf("  attempt to modify %s => %s %d\n", tcp->opened_filename, redirected_filename, tcp->pid);
+  //printf("  attempt to modify %s => %s\n", tcp->opened_filename, redirected_filename);
 
   if (!tcp->childshm) {
     begin_setup_shmat(tcp);
@@ -1796,15 +1796,19 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
   }
 }
 
-// hmmm, don't do any path spoofing yet
+
 void CDE_end_getcwd(struct tcb* tcp) {
-  /*
   if (!syserror(tcp)) {
-    //char stuff[100];
-    //strcpy(stuff, "/tmp/chttpd/obj-klee/src");
-    //memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], stuff, 25);
+    if (CDE_exec_mode) {
+      // TODO: we don't account for the child doing chdir()!!!
+      // If we want to account for that, we need to instrument
+      // CDE_end_chdir to update child_current_pwd
+      char* saved_pwd = getenv("PWD");
+      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], saved_pwd, strlen(saved_pwd) + 1);
+    }
+    else {
+    }
   }
-  */
 }
 
 

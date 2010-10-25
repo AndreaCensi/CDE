@@ -595,11 +595,9 @@ startup_child (char **argv)
           else if (is_home) {
             setenv("HOME", stripped_str, 1);
           }
-          /* pgbovine - don't worry about PWD yet ...
           else if (is_pwd) {
             setenv("PWD", stripped_str, 1);
           }
-          */
 
           free(stripped_str);
           break;
@@ -620,20 +618,18 @@ startup_child (char **argv)
 
     fputs("PATH=", envF);
     fputs(getenv("PATH"), envF);
-    fputs("\n", envF);
 
+    fputs("\n", envF);
     fputs("USER=", envF);
     fputs(getenv("USER"), envF);
-    fputs("\n", envF);
 
+    fputs("\n", envF);
     fputs("HOME=", envF);
     fputs(getenv("HOME"), envF);
 
-    /*
     fputs("\n", envF);
     fputs("PWD=", envF);
     fputs(getenv("PWD"), envF);
-    */
 
     fclose(envF);
 
