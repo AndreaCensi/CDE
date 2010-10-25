@@ -331,7 +331,7 @@ static void copy_file_into_cde_root(char* filename) {
   }
 
 
-  if (S_ISREG(filename_stat.st_mode)) { // regular file or symlink
+  if (S_ISREG(filename_stat.st_mode)) { // regular file or symlink to regular file
 
     // lazy optimization to avoid redundant copies ...
     struct stat dst_path_stat;
@@ -345,93 +345,112 @@ static void copy_file_into_cde_root(char* filename) {
     }
 
     mkdir_recursive(dst_path, 1);
+  }
 
-    // finally, 'copy' filename over to dst_path
 
-    // if it's a symlink, copy both it and its target
-    if (is_symlink) {
-      // target file must exist, so let's resolve its name
-      int len = readlink(filename, path, sizeof path);
-      EXITIF(len < 0);
-      path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
-      char* orig_symlink_target = strdup(path);
+  // finally, 'copy' filename over to dst_path
 
-      char* filename_copy = strdup(filename); // dirname() destroys its arg
-      char* dir = dirname(filename_copy);
+  // if it's a symlink, copy both it and its target
+  if (is_symlink) {
+    // target file must exist, so let's resolve its name
+    int len = readlink(filename, path, sizeof path);
+    EXITIF(len < 0);
+    path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
+    char* orig_symlink_target = strdup(path);
 
-      // resolve the realpath() of dir
-      path[0] = '\0';
-      realpath(dir, path);
-      assert(path[0] != '\0');
+    char* filename_copy = strdup(filename); // dirname() destroys its arg
+    char* dir = dirname(filename_copy);
 
-      // now path is the realpath() of dir
-      assert(path[0] == '/');
+    // resolve the realpath() of dir
+    path[0] = '\0';
+    realpath(dir, path);
+    assert(path[0] != '\0');
 
-      char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
+    // now path is the realpath() of dir
+    assert(path[0] == '/');
 
-      char* symlink_target_abspath = NULL;
-      // ugh, remember that symlinks can point to both absolute AND
-      // relative paths ...
-      if (IS_ABSPATH(orig_symlink_target)) {
-        symlink_target_abspath = strdup(orig_symlink_target);
+    char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
 
-        // this is sort of tricky.  we need to insert in a bunch of ../
-        // to bring the directory BACK UP to cde-root, and then we need
-        // to insert in the original absolute path, in order to make the
-        // symlink in the CDE package a RELATIVE path starting from
-        // the cde-root/ base directory
-        struct path* p = str2path(path);
-        static char tmp[MAXPATHLEN];
-        // TODO: this probably doesn't work perfectly, maybe fails on '/' dir
-        if (p->depth > 0) {
-          strcpy(tmp, "..");
-          int i;
-          for (i = 1; i < p->depth; i++) {
-            strcat(tmp, "/..");
-          }
+    char* symlink_target_abspath = NULL;
+    // ugh, remember that symlinks can point to both absolute AND
+    // relative paths ...
+    if (IS_ABSPATH(orig_symlink_target)) {
+      symlink_target_abspath = strdup(orig_symlink_target);
+
+      // this is sort of tricky.  we need to insert in a bunch of ../
+      // to bring the directory BACK UP to cde-root, and then we need
+      // to insert in the original absolute path, in order to make the
+      // symlink in the CDE package a RELATIVE path starting from
+      // the cde-root/ base directory
+      struct path* p = str2path(path);
+      static char tmp[MAXPATHLEN];
+      if (p->depth > 0) {
+        strcpy(tmp, "..");
+        int i;
+        for (i = 1; i < p->depth; i++) {
+          strcat(tmp, "/..");
         }
-        delete_path(p);
-
-        strcat(tmp, orig_symlink_target);
-
-        // create a new identical symlink in cde-root/
-        //printf("symlink(%s, %s)\n", tmp, symlink_loc_in_package);
-        EXITIF(symlink(tmp, symlink_loc_in_package) < 0);
       }
       else {
-        symlink_target_abspath = format("%s/%s", path, orig_symlink_target);
-
-        // create a new identical symlink in cde-root/
-        //printf("symlink(%s, %s)\n", orig_symlink_target, symlink_loc_in_package);
-        EXITIF(symlink(orig_symlink_target, symlink_loc_in_package) < 0);
+        strcpy(tmp, ".");
       }
-      assert(symlink_target_abspath);
+      delete_path(p);
 
-      // ok, let's get the absolute path without any '..' or '.' funniness
-      // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
-      char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath);
-      char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
-      //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
-      //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
-      free(symlink_dst_tmp_path);
+      strcat(tmp, orig_symlink_target);
 
-      // ugh, this is getting really really gross, mkdir all dirs stated in
-      // symlink_dst_abspath if they don't yet exist
-      mkdir_recursive(symlink_dst_abspath, 1);
+      // create a new identical symlink in cde-root/
+      printf("symlink(%s, %s), symlink_target_abspath=%s\n", tmp, symlink_loc_in_package, symlink_target_abspath);
+      symlink(tmp, symlink_loc_in_package);
+    }
+    else {
+      symlink_target_abspath = format("%s/%s", path, orig_symlink_target);
 
+      // create a new identical symlink in cde-root/
+      //printf("symlink(%s, %s)\n", orig_symlink_target, symlink_loc_in_package);
+      symlink(orig_symlink_target, symlink_loc_in_package);
+    }
+    assert(symlink_target_abspath);
+
+    // ok, let's get the absolute path without any '..' or '.' funniness
+    // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
+    char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath);
+    char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
+    //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
+    printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
+    free(symlink_dst_tmp_path);
+
+    // ugh, this is getting really really gross, mkdir all dirs stated in
+    // symlink_dst_abspath if they don't yet exist
+    mkdir_recursive(symlink_dst_abspath, 1);
+
+
+    if (S_ISREG(filename_stat.st_mode)) { // symlink to regular file
       //printf("  cp %s %s\n", symlink_target_abspath, symlink_dst_abspath);
       // copy the target file over to cde-root/
       if ((link(symlink_target_abspath, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
         copy_file(symlink_target_abspath, symlink_dst_abspath);
       }
 
-      free(symlink_loc_in_package);
-      free(symlink_target_abspath);
-      free(symlink_dst_abspath);
-      free(orig_symlink_target);
-      free(filename_copy);
+      // if it's a shared library, then heuristically try to grep
+      // through it to find whether it might dynamically load any other
+      // libraries (e.g., those for other CPU types that we can't pick
+      // up via strace)
+      find_and_copy_possible_dynload_libs(filename);
+
     }
-    else { // regular file, simple common case :)
+    else if (S_ISDIR(filename_stat.st_mode)) { // symlink to directory
+      // hmmm, should we just leave this empty?
+    }
+
+    free(symlink_loc_in_package);
+    free(symlink_target_abspath);
+    free(symlink_dst_abspath);
+    free(orig_symlink_target);
+    free(filename_copy);
+  }
+  else {  // !is_symlink
+    if (S_ISREG(filename_stat.st_mode)) { // regular file
+      // regular file, simple common case :)
       // 1.) try a hard link for efficiency
       // 2.) if that fails, then do a straight-up copy,
       //     but do NOT follow symlinks
@@ -441,19 +460,17 @@ static void copy_file_into_cde_root(char* filename) {
       if ((link(filename, dst_path) != 0) && (errno != EEXIST)) {
         copy_file(filename, dst_path);
       }
+
+      // if it's a shared library, then heuristically try to grep
+      // through it to find whether it might dynamically load any other
+      // libraries (e.g., those for other CPU types that we can't pick
+      // up via strace)
+      find_and_copy_possible_dynload_libs(filename);
     }
-
-
-    // if it's a shared library, then heuristically try to grep
-    // through it to find whether it might dynamically load any other
-    // libraries (e.g., those for other CPU types that we can't pick
-    // up via strace)
-    find_and_copy_possible_dynload_libs(filename);
-
-  }
-  else if (S_ISDIR(filename_stat.st_mode)) { // directory
-    // do a "mkdir -p filename" after redirecting it into cde-root/
-    mkdir_recursive(dst_path, 0);
+    else if (S_ISDIR(filename_stat.st_mode)) { // directory or symlink to directory
+      // do a "mkdir -p filename" after redirecting it into cde-root/
+      mkdir_recursive(dst_path, 0);
+    }
   }
 
 done:
@@ -1743,5 +1760,40 @@ void CDE_end_getcwd(struct tcb* tcp) {
     //printf("CDE_end_getcwd %s\n", path);
   }
   */
+}
+
+
+// path_envvar is $PATH.  Iterate through all entries and if any of them
+// are symlinks, then create their corresponding entries in cde-root/.
+// This takes care of cases where, say, /bin is actually a symlink to
+// another directory like /KNOPPIX/bin.  We need to create a symlink
+// 'bin' in cde-root/ and point it to ./KNOPPIX/bin
+void CDE_create_path_symlink_dirs() {
+  char *p;
+  int m, n;
+
+  for (p = getenv("PATH"); p && *p; p += m) {
+    if (strchr(p, ':')) {
+      n = strchr(p, ':') - p;
+      m = n + 1;
+    }
+    else {
+      m = n = strlen(p);
+    }
+
+    strncpy(path, p, n);
+    path[n] = '\0';
+
+    // this will NOT follow the symlink ...
+    struct stat filename_stat;
+    if (lstat(path, &filename_stat) == 0) {
+      char is_symlink = S_ISLNK(filename_stat.st_mode);
+      if (is_symlink) {
+        char* tmp = strdup(path);
+        copy_file_into_cde_root(tmp);
+        free(tmp);
+      }
+    }
+  }
 }
 

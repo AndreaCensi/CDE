@@ -95,6 +95,7 @@ extern void alloc_tcb_CDE_fields(struct tcb* tcp);
 extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
 extern void strcpy_redirected_cderoot(char* dst, char* src);
+extern void CDE_create_path_symlink_dirs(void);
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -633,6 +634,8 @@ startup_child (char **argv)
     */
 
     fclose(envF);
+
+    CDE_create_path_symlink_dirs();
   }
 
 
