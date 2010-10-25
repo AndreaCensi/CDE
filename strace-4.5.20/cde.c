@@ -13,6 +13,10 @@ static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename);
 
+static char* strcpy_from_child(struct tcb* tcp, long addr);
+static char* realpath_strdup(char* filename);
+static char* readlink_strdup(char* filename);
+
 #define SHARED_PAGE_SIZE (MAXPATHLEN * 2)
 
 // quick check for whether a path is absolute
@@ -40,9 +44,6 @@ void path_pop(struct path* p);
 
 static char* redirect_filename(char* filename);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
-
-// used as temporary holding spaces for paths copied from child process
-static char path[MAXPATHLEN + 1];
 
 // the pwd at the START of execution
 // (the target program might alter it later with a chdir syscall!)
@@ -178,11 +179,10 @@ static char* realpath_nofollow(char* filename) {
 
     char* filename_copy = strdup(filename); // dirname() destroys its arg
     char* dir = dirname(filename_copy);
-    path[0] = '\0';
-    realpath(dir, path);
-    assert(path[0] != '\0');
 
-    ret = format("%s/%s", path, bn);
+    char* dir_realpath = realpath_strdup(dir);
+    ret = format("%s/%s", dir_realpath, bn);
+    free(dir_realpath);
     free(filename_copy);
   }
   else {
@@ -192,11 +192,10 @@ static char* realpath_nofollow(char* filename) {
 
     char* tmp_copy = strdup(tmp); // dirname() destroys its arg
     char* dir = dirname(tmp_copy);
-    path[0] = '\0';
-    realpath(dir, path);
-    assert(path[0] != '\0');
 
-    ret = format("%s/%s", path, bn);
+    char* dir_realpath = realpath_strdup(dir);
+    ret = format("%s/%s", dir_realpath, bn);
+    free(dir_realpath);
     free(tmp_copy);
     free(tmp);
   }
@@ -211,18 +210,12 @@ static int file_is_within_starting_pwd(char* filename) {
   char* path_to_check = NULL;
 
   if (IS_ABSPATH(filename)) {
-    path[0] = '\0';
-    realpath(filename, path);
-    assert(path[0] != '\0');
-    path_to_check = strdup(path);
+    path_to_check = realpath_strdup(filename);
   }
   else {
     // note that the target program might have done a chdir, so we need to handle that ;)
     char* tmp = format("%s/%s", child_current_pwd, filename);
-    path[0] = '\0';
-    realpath(tmp, path);
-    assert(path[0] != '\0');
-    path_to_check = strdup(path);
+    path_to_check = realpath_strdup(tmp);
     free(tmp);
   }
 
@@ -378,21 +371,13 @@ static void copy_file_into_cde_root(char* filename) {
   // if it's a symlink, copy both it and its target
   if (is_symlink) {
     // target file must exist, so let's resolve its name
-    int len = readlink(filename_abspath, path, sizeof path);
-    EXITIF(len < 0);
-    path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
-    char* orig_symlink_target = strdup(path);
+    char* orig_symlink_target = readlink_strdup(filename_abspath);
 
     char* filename_copy = strdup(filename); // dirname() destroys its arg
     char* dir = dirname(filename_copy);
 
     // resolve the realpath() of dir
-    path[0] = '\0';
-    realpath(dir, path);
-    assert(path[0] != '\0');
-
-    // now path is the realpath() of dir
-    assert(path[0] == '/');
+    char* dir_realpath = realpath_strdup(dir);
 
     char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
 
@@ -407,8 +392,8 @@ static void copy_file_into_cde_root(char* filename) {
       // to insert in the original absolute path, in order to make the
       // symlink in the CDE package a RELATIVE path starting from
       // the cde-root/ base directory
-      struct path* p = str2path(path);
-      static char tmp[MAXPATHLEN];
+      struct path* p = str2path(dir_realpath);
+      char tmp[MAXPATHLEN];
       if (p->depth > 0) {
         strcpy(tmp, "..");
         int i;
@@ -427,13 +412,14 @@ static void copy_file_into_cde_root(char* filename) {
       symlink(tmp, symlink_loc_in_package);
     }
     else {
-      symlink_target_abspath = format("%s/%s", path, orig_symlink_target);
+      symlink_target_abspath = format("%s/%s", dir_realpath, orig_symlink_target);
 
       // create a new identical symlink in cde-root/
       //printf("symlink(%s, %s)\n", orig_symlink_target, symlink_loc_in_package);
       symlink(orig_symlink_target, symlink_loc_in_package);
     }
     assert(symlink_target_abspath);
+    free(dir_realpath);
 
     // ok, let's get the absolute path without any '..' or '.' funniness
     // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
@@ -540,7 +526,7 @@ static void find_and_copy_possible_dynload_libs(char* filename) {
   int i;
   int dlopen_found = 0; // did we find a symbol starting with 'dlopen'?
 
-  static char cur_string[4096];
+  char cur_string[4096];
   cur_string[0] = '\0';
   int cur_ind = 0;
 
@@ -675,15 +661,13 @@ static void modify_syscall_two_args(struct tcb* tcp) {
     return; // MUST punt early here!!!
   }
 
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  char* path_copy = strdup(path);
-  char* redirected_filename1 = redirect_filename(path_copy);
-  free(path_copy);
+  char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
+  char* redirected_filename1 = redirect_filename(filename1);
+  free(filename1);
 
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
-  path_copy = strdup(path);
-  char* redirected_filename2 = redirect_filename(path_copy);
-  free(path_copy);
+  char* filename2 = strcpy_from_child(tcp, tcp->u_arg[1]);
+  char* redirected_filename2 = redirect_filename(filename2);
+  free(filename2);
 
   // gotta do both, yuck
   if (redirected_filename1 && redirected_filename2) {
@@ -804,8 +788,7 @@ sys_readlink(path, ...)
  */
 void CDE_begin_standard_fileop(struct tcb* tcp, const char* syscall_name) {
   assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
+  tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
 
   if (CDE_exec_mode) {
     //printf("begin %s %s\n", syscall_name, tcp->opened_filename);
@@ -840,8 +823,7 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
 
 void CDE_begin_execve(struct tcb* tcp) {
   assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
+  tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
 
   // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
   // is a valid executable file WITHIN cde-root/ ... otherwise don't do
@@ -1018,8 +1000,6 @@ void CDE_begin_execve(struct tcb* tcp) {
       while (1) {
         cur_arg = new_argv[i];
         if (cur_arg) {
-          EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
-          //printf("  new_argv[%d] = %s\n", i, path);
           i++;
         }
         // argv is null-terminated
@@ -1084,8 +1064,6 @@ void CDE_begin_execve(struct tcb* tcp) {
       while (1) {
         cur_arg = new_argv[i];
         if (cur_arg) {
-          EXITIF(umovestr(tcp, (long)cur_arg, sizeof path, path) < 0);
-          //printf("  new_argv[%d] = %s\n", i, path);
           i++;
         }
         // argv is null-terminated
@@ -1187,8 +1165,7 @@ void CDE_end_uname(struct tcb* tcp) {
 
 void CDE_begin_file_unlink(struct tcb* tcp) {
   assert(!tcp->opened_filename);
-  EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  tcp->opened_filename = strdup(path);
+  tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
   //printf("CDE_begin_file_unlink %s\n", tcp->opened_filename);
 
   if (CDE_exec_mode) {
@@ -1221,19 +1198,18 @@ void CDE_end_file_link(struct tcb* tcp) {
   }
   else {
     if (tcp->u_rval == 0) {
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-      char* redirected_filename1 = redirect_filename(path);
-
+      char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
+      char* redirected_filename1 = redirect_filename(filename1);
       // first copy the origin file into cde-root/ before trying to link it
-      char* filename_tmp = strdup(path);
-      copy_file_into_cde_root(filename_tmp);
-      free(filename_tmp);
+      copy_file_into_cde_root(filename1);
 
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
-      char* redirected_filename2 = redirect_filename(path);
+      char* filename2 = strcpy_from_child(tcp, tcp->u_arg[1]);
+      char* redirected_filename2 = redirect_filename(filename2);
 
       link(redirected_filename1, redirected_filename2);
 
+      free(filename1);
+      free(filename2);
       free(redirected_filename1);
       free(redirected_filename2);
     }
@@ -1253,11 +1229,8 @@ void CDE_end_file_symlink(struct tcb* tcp) {
   }
   else {
     if (tcp->u_rval == 0) {
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-      char* oldname = strdup(path);
-
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
-      char* newname = strdup(path);
+      char* oldname = strcpy_from_child(tcp, tcp->u_arg[0]);
+      char* newname = strcpy_from_child(tcp, tcp->u_arg[1]);
       char* newname_redirected = redirect_filename(newname);
 
       symlink(oldname, newname_redirected);
@@ -1282,19 +1255,19 @@ void CDE_end_file_rename(struct tcb* tcp) {
   }
   else {
     if (tcp->u_rval == 0) {
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-      char* redirected_filename1 = redirect_filename(path);
+      char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
+      char* redirected_filename1 = redirect_filename(filename1);
+      free(filename1);
       // remove original file from cde-root/
       if (redirected_filename1) {
         unlink(redirected_filename1);
         free(redirected_filename1);
       }
 
-      EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
       // copy the destination file into cde-root/
-      char* filename_tmp = strdup(path);
-      copy_file_into_cde_root(filename_tmp);
-      free(filename_tmp);
+      char* dst_filename = strcpy_from_child(tcp, tcp->u_arg[1]);
+      copy_file_into_cde_root(dst_filename);
+      free(dst_filename);
     }
   }
 }
@@ -1318,10 +1291,9 @@ void CDE_end_chdir(struct tcb* tcp) {
       }
 
       // update child_current_pwd
-      path[0] = '\0';
-      realpath(tcp->opened_filename, path);
-      assert(path[0] != '\0');
-      strcpy(child_current_pwd, path);
+      char* tmp = realpath_strdup(tcp->opened_filename);
+      strcpy(child_current_pwd, tmp);
+      free(tmp);
       //printf("  chdir %s\n", child_current_pwd);
     }
   }
@@ -1757,6 +1729,39 @@ void strcpy_redirected_cderoot(char* dst, char* src) {
   }
 }
 
+
+// malloc a new string from child
+static char* strcpy_from_child(struct tcb* tcp, long addr) {
+  char path[MAXPATHLEN + 1];
+  path[0] = '\0';
+  EXITIF(umovestr(tcp, addr, sizeof path, path) < 0);
+  assert(path[0] != '\0');
+  return strdup(path);
+}
+
+// mallocs a new string
+static char* realpath_strdup(char* filename) {
+  char path[MAXPATHLEN + 1];
+  path[0] = '\0';
+  realpath(filename, path);
+  assert(path[0] == '/'); // must be an absolute path
+  return strdup(path);
+}
+
+// mallocs a new string
+static char* readlink_strdup(char* filename) {
+  char path[MAXPATHLEN + 1];
+
+  path[0] = '\0';
+  int len = readlink(filename, path, sizeof path);
+  assert(path[0] != '\0');
+
+  EXITIF(len < 0);
+  path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
+  return strdup(path);
+}
+
+
 // adapted from the Goanna project by Spillane et al.
 // dst_in_child is a pointer in the child's address space
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
@@ -1798,9 +1803,6 @@ void CDE_end_getcwd(struct tcb* tcp) {
     //char stuff[100];
     //strcpy(stuff, "/tmp/chttpd/obj-klee/src");
     //memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], stuff, 25);
-
-    //EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-    //printf("CDE_end_getcwd %s\n", path);
   }
   */
 }
@@ -1815,6 +1817,7 @@ void CDE_create_path_symlink_dirs() {
   char *p;
   int m, n;
   struct stat st;
+  char tmp_buf[MAXPATHLEN];
 
   for (p = getenv("PATH"); p && *p; p += m) {
     if (strchr(p, ':')) {
@@ -1825,14 +1828,14 @@ void CDE_create_path_symlink_dirs() {
       m = n = strlen(p);
     }
 
-    strncpy(path, p, n);
-    path[n] = '\0';
+    strncpy(tmp_buf, p, n);
+    tmp_buf[n] = '\0';
 
     // this will NOT follow the symlink ...
-    if (lstat(path, &st) == 0) {
+    if (lstat(tmp_buf, &st) == 0) {
       char is_symlink = S_ISLNK(st.st_mode);
       if (is_symlink) {
-        char* tmp = strdup(path);
+        char* tmp = strdup(tmp_buf);
         copy_file_into_cde_root(tmp);
         free(tmp);
       }
@@ -1844,23 +1847,23 @@ void CDE_create_path_symlink_dirs() {
   // for libraries in those places, but they're not in any convenient
   // environment variable
 
-  strcpy(path, "/lib");
+  strcpy(tmp_buf, "/lib");
   // this will NOT follow the symlink ...
-  if (lstat(path, &st) == 0) {
+  if (lstat(tmp_buf, &st) == 0) {
     char is_symlink = S_ISLNK(st.st_mode);
     if (is_symlink) {
-      char* tmp = strdup(path);
+      char* tmp = strdup(tmp_buf);
       copy_file_into_cde_root(tmp);
       free(tmp);
     }
   }
 
-  strcpy(path, "/usr/lib");
+  strcpy(tmp_buf, "/usr/lib");
   // this will NOT follow the symlink ...
-  if (lstat(path, &st) == 0) {
+  if (lstat(tmp_buf, &st) == 0) {
     char is_symlink = S_ISLNK(st.st_mode);
     if (is_symlink) {
-      char* tmp = strdup(path);
+      char* tmp = strdup(tmp_buf);
       copy_file_into_cde_root(tmp);
       free(tmp);
     }
