@@ -154,14 +154,15 @@ static int ignore_path(char* filename) {
 
   // /dev and /proc are special system directories with fake files
   //
-  // .Xauthority is used for X11 authentication via ssh, so we need to
-  // use the REAL version and not the one in cde-root/
+  // On second thought, don't ignore this yet ...
+  //   .Xauthority is used for X11 authentication via ssh, so we need to
+  //   use the REAL version and not the one in cde-root/
+  //     (strcmp(basename(filename), ".Xauthority") == 0)) {
   //
   // TODO: /proc/sys/kernel/osrelease is sometimes used instead of uname
   //       syscall, so perhaps don't ignore it
   if ((strncmp(filename, "/dev/", 5) == 0) ||
-      (strncmp(filename, "/proc/", 6) == 0) ||
-      (strcmp(basename(filename), ".Xauthority") == 0)) {
+      (strncmp(filename, "/proc/", 6) == 0)) {
     return 1;
   }
 
