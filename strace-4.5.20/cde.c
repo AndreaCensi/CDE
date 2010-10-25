@@ -676,10 +676,14 @@ static void modify_syscall_two_args(struct tcb* tcp) {
   }
 
   EXITIF(umovestr(tcp, (long)tcp->u_arg[0], sizeof path, path) < 0);
-  char* redirected_filename1 = redirect_filename(path);
+  char* path_copy = strdup(path);
+  char* redirected_filename1 = redirect_filename(path_copy);
+  free(path_copy);
 
   EXITIF(umovestr(tcp, (long)tcp->u_arg[1], sizeof path, path) < 0);
-  char* redirected_filename2 = redirect_filename(path);
+  path_copy = strdup(path);
+  char* redirected_filename2 = redirect_filename(path_copy);
+  free(path_copy);
 
   // gotta do both, yuck
   if (redirected_filename1 && redirected_filename2) {
