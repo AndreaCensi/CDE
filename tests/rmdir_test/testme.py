@@ -9,4 +9,4 @@ if stderr: print "stderr:", stderr
 
 assert os.path.isdir('cde-root/tmp/guinea-pig-dir')
 assert not os.path.isdir('cde-root/tmp/guinea-pig-dir/guinea-pig-subdir')
-
+generic_lib_checks()

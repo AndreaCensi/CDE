@@ -8,3 +8,4 @@ clear_cde_root()
 if stderr: print "stderr:", stderr
 
 assert os.path.isfile('cde-root/home/pgbovine/epd-6.2-2-rh5-x86/bin/python')
+generic_lib_checks()

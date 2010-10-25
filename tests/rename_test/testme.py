@@ -8,4 +8,4 @@ clear_cde_root()
 if stderr: print "stderr:", stderr
 
 assert os.path.isfile('cde-root/home/pgbovine/CDE/tests/guinea-pig2.txt')
-
+generic_lib_checks()

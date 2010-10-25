@@ -8,3 +8,4 @@ clear_cde_root()
 if stderr: print "stderr:", stderr
 
 assert os.path.isfile('cde-root/bin/uname')
+generic_lib_checks()

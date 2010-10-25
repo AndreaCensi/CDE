@@ -8,4 +8,4 @@ clear_cde_root()
 if stderr: print "stderr:", stderr
 
 assert os.path.isdir('cde-root/tmp/testdir/')
-
+generic_lib_checks()

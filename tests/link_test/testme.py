@@ -9,4 +9,4 @@ if stderr: print "stderr:", stderr
 
 assert os.path.isfile('cde-root/home/pgbovine/CDE/tests/test_file.txt')
 assert os.path.isfile('cde-root/home/pgbovine/CDE/tests/test_file.hardlink')
-
+generic_lib_checks()

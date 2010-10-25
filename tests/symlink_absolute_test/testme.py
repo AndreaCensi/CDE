@@ -11,4 +11,4 @@ assert os.path.isfile('cde-root/home/pgbovine/CDE/tests/test_file.txt')
 assert os.path.islink('cde-root/home/pgbovine/CDE/tests/absolute-symlink.test_file.txt')
 assert os.readlink('cde-root/home/pgbovine/CDE/tests/absolute-symlink.test_file.txt') == \
                    '../../../../home/pgbovine/CDE/tests/test_file.txt'
-
+generic_lib_checks()

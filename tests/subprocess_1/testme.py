@@ -9,4 +9,4 @@ if stderr: print "stderr:", stderr
 
 assert os.path.isdir('cde-root/home/pgbovine/epd-6.2-2-rh5-x86/lib/python2.6/site-packages/numpy')
 assert os.path.isdir('cde-root/home/pgbovine/epd-6.2-2-rh5-x86/lib/python2.6/site-packages/scipy')
-
+generic_lib_checks()
