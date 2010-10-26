@@ -87,15 +87,11 @@ static int ignore_path(char* filename) {
 
   // /dev and /proc are special system directories with fake files
   //
-  // On second thought, don't ignore this yet ...
-  //   .Xauthority is used for X11 authentication via ssh, so we need to
-  //   use the REAL version and not the one in cde-root/
-  //     (strcmp(basename(filename), ".Xauthority") == 0)) {
-  //
-  // TODO: /proc/sys/kernel/osrelease is sometimes used instead of uname
-  //       syscall, so perhaps don't ignore it
+  // .Xauthority is used for X11 authentication via ssh, so we need to
+  // use the REAL version and not the one in cde-root/
   if ((strncmp(filename, "/dev/", 5) == 0) ||
-      (strncmp(filename, "/proc/", 6) == 0)) {
+      (strncmp(filename, "/proc/", 6) == 0) ||
+      (strcmp(basename(filename), ".Xauthority") == 0)) {
     return 1;
   }
 
@@ -1006,6 +1002,10 @@ void CDE_end_execve(struct tcb* tcp) {
 }
 
 
+/* spoofing uname leads to mysterious weird results like remote X11
+   displays not working (I think .Xauthority relies on an accurate uname)
+   so let's not spoof uname for now
+
 #include <sys/utsname.h>
 
 void CDE_end_uname(struct tcb* tcp) {
@@ -1037,6 +1037,7 @@ void CDE_end_uname(struct tcb* tcp) {
     close(outF);
   }
 }
+*/
 
 
 void CDE_begin_file_unlink(struct tcb* tcp) {

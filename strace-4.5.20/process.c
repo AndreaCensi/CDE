@@ -253,7 +253,7 @@ static const struct xlat prctl_options[] = {
 extern void CDE_begin_execve(struct tcb* tcp);
 extern void CDE_end_execve(struct tcb* tcp);
 
-extern void CDE_end_uname(struct tcb* tcp);
+//extern void CDE_end_uname(struct tcb* tcp);
 
 
 static const char *
@@ -2152,14 +2152,6 @@ int
 sys_uname(tcp)
 struct tcb *tcp;
 {
-  // pgbovine
-  if (exiting(tcp)) {
-    CDE_end_uname(tcp);
-  }
-
-  return 0;
-
-  /*
 	struct utsname uname;
 
 	if (exiting(tcp)) {
@@ -2186,7 +2178,6 @@ struct tcb *tcp;
 				uname.sysname, uname.nodename);
 	}
 	return 0;
-  */
 }
 
 #ifndef SVR4
