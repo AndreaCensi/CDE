@@ -1,9 +1,5 @@
 #include "cde.h"
-
-// This forces gcc to use an older version of realpath from glibc 2.0,
-// to maximize backwards compatibility
-// See: http://www.trevorpounds.com/blog/?p=103
-__asm__(".symver realpath,realpath@GLIBC_2.0");
+#include "paths.h"
 
 // 1 if we are executing code in a CDE package,
 // 0 for tracing regular execution
@@ -14,8 +10,6 @@ static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename);
 
 static char* strcpy_from_child(struct tcb* tcp, long addr);
-static char* realpath_strdup(char* filename);
-static char* readlink_strdup(char* filename);
 
 #define SHARED_PAGE_SIZE (MAXPATHLEN * 2)
 
@@ -1748,29 +1742,6 @@ static char* strcpy_from_child(struct tcb* tcp, long addr) {
   EXITIF(umovestr(tcp, addr, sizeof path, path) < 0);
   return strdup(path);
 }
-
-// mallocs a new string
-static char* realpath_strdup(char* filename) {
-  char path[MAXPATHLEN + 1];
-  path[0] = '\0';
-  realpath(filename, path);
-  assert(path[0] == '/'); // must be an absolute path
-  return strdup(path);
-}
-
-// mallocs a new string
-static char* readlink_strdup(char* filename) {
-  char path[MAXPATHLEN + 1];
-
-  path[0] = '\0';
-  int len = readlink(filename, path, sizeof path);
-  assert(path[0] != '\0');
-
-  EXITIF(len < 0);
-  path[len] = '\0'; // wow, readlink doesn't put the cap on the end!
-  return strdup(path);
-}
-
 
 // adapted from the Goanna project by Spillane et al.
 // dst_in_child is a pointer in the child's address space

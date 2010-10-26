@@ -64,7 +64,7 @@ am_strace_OBJECTS = strace.$(OBJEXT) syscall.$(OBJEXT) count.$(OBJEXT) \
 	process.$(OBJEXT) bjm.$(OBJEXT) quota.$(OBJEXT) \
 	resource.$(OBJEXT) signal.$(OBJEXT) sock.$(OBJEXT) \
 	system.$(OBJEXT) term.$(OBJEXT) time.$(OBJEXT) proc.$(OBJEXT) \
-	scsi.$(OBJEXT) stream.$(OBJEXT) cde.$(OBJEXT)
+	scsi.$(OBJEXT) stream.$(OBJEXT) cde.$(OBJEXT) paths.$(OBJEXT)
 strace_OBJECTS = $(am_strace_OBJECTS)
 strace_LDADD = $(LDADD)
 am__vpath_adj_setup = srcdirstrip=`echo "$(srcdir)" | sed 's|.|.|g'`;
@@ -228,9 +228,9 @@ INCLUDES = -I$(srcdir)/$(OS)/$(ARCH) -I$(srcdir)/$(OS)
 strace_SOURCES = strace.c syscall.c count.c util.c desc.c file.c ipc.c \
 		 io.c ioctl.c mem.c net.c process.c bjm.c quota.c \
 		 resource.c signal.c sock.c system.c term.c time.c \
-		 proc.c scsi.c stream.c cde.c
+		 proc.c scsi.c stream.c cde.c paths.c
 
-noinst_HEADERS = defs.h cde.h
+noinst_HEADERS = defs.h cde.h paths.h
 EXTRA_DIST = $(man_MANS) errnoent.sh signalent.sh syscallent.sh ioctlsort.c \
 	     debian/changelog debian/control debian/copyright debian/rules \
 	     debian/compat debian/strace64.install debian/strace64.manpages \
@@ -468,6 +468,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/time.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/util.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cde.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/paths.Po@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
