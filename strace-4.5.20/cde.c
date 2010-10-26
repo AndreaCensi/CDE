@@ -25,6 +25,7 @@ char child_current_pwd[PATH_MAX];
 // to shut up gcc warnings without going thru #include hell
 extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
+
 // maps relative paths to their locations within cde-root/
 // (serialized as cde-root/cde.relpaths file)
 static struct {
@@ -62,22 +63,6 @@ void CDE_init_relpaths(void) {
   }
   free(tmp);
   fclose(relpath_f);
-}
-
-
-// useful utility function from ccache codebase
-// http://ccache.samba.org/
-/* Construct a string according to a format. Caller frees. */
-char* format(const char *format, ...) {
-  va_list ap;
-  char *ptr = NULL;
-
-  va_start(ap, format);
-  EXITIF(vasprintf(&ptr, format, ap) == -1);
-  va_end(ap);
-
-  EXITIF(!*ptr);
-  return ptr;
 }
 
 // prepend "cde-root" to the given path string, assumes that the string

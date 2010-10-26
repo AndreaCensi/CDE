@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+//#define _GNU_SOURCE // for vasprintf (now we include _GNU_SOURCE in Makefile)
+#include <stdio.h>
+
 
 // quick check for whether a path is absolute
 #define IS_ABSPATH(p) (p[0] == '/')
@@ -18,6 +21,8 @@
 // to shut up gcc warnings without going thru #include hell
 extern char* basename(const char *fname);
 extern char *dirname(char *path);
+
+char* format(const char *format, ...);
 
 
 char* realpath_strdup(char* filename);

@@ -348,3 +348,19 @@ int file_is_within_dir(char* filename, char* target_dir, char* relative_path_bas
   return is_within_pwd;
 }
 
+
+// useful utility function from ccache codebase
+// http://ccache.samba.org/
+/* Construct a string according to a format. Caller frees. */
+char* format(const char *format, ...) {
+  va_list ap;
+  char *ptr = NULL;
+
+  va_start(ap, format);
+  vasprintf(&ptr, format, ap);
+  va_end(ap);
+
+  assert(*ptr);
+  return ptr;
+}
+
