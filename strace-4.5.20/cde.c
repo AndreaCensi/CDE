@@ -11,39 +11,16 @@ static void find_and_copy_possible_dynload_libs(char* filename);
 
 static char* strcpy_from_child(struct tcb* tcp, long addr);
 
-#define SHARED_PAGE_SIZE (MAXPATHLEN * 2)
-
-// quick check for whether a path is absolute
-#define IS_ABSPATH(p) (p[0] == '/')
-
-/* A structure to represent paths. */
-struct namecomp {
-  int len;
-  char str[0];
-};
-
-struct path {
-  int stacksize; // num elts in stack
-  int depth;     // actual depth of path (smaller than stacksize)
-  int is_abspath; // 1 if absolute path (starts with '/'), 0 if relative path
-  struct namecomp **stack;
-};
-
-struct path* str2path(char* path);
-char* path2str(struct path* path, int depth);
-struct path* path_dup(struct path* path);
-struct path *new_path();
-void delete_path(struct path *path);
-void path_pop(struct path* p);
+#define SHARED_PAGE_SIZE (PATH_MAX * 2)
 
 static char* redirect_filename(char* filename);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 
 // the pwd at the START of execution
 // (the target program might alter it later with a chdir syscall!)
-char starting_pwd[MAXPATHLEN + 1];
+char starting_pwd[PATH_MAX];
 // current pwd, keeping up to date with chdir syscalls
-char child_current_pwd[MAXPATHLEN + 1];
+char child_current_pwd[PATH_MAX];
 
 // to shut up gcc warnings without going thru #include hell
 extern char* basename(const char *fname);
@@ -396,7 +373,7 @@ static void copy_file_into_cde_root(char* filename) {
       // symlink in the CDE package a RELATIVE path starting from
       // the cde-root/ base directory
       struct path* p = str2path(dir_realpath);
-      char tmp[MAXPATHLEN];
+      char tmp[PATH_MAX];
       if (p->depth > 0) {
         strcpy(tmp, "..");
         int i;
@@ -529,7 +506,7 @@ static void find_and_copy_possible_dynload_libs(char* filename) {
   int i;
   int dlopen_found = 0; // did we find a symbol starting with 'dlopen'?
 
-  char cur_string[4096];
+  char cur_string[PATH_MAX];
   cur_string[0] = '\0';
   int cur_ind = 0;
 
@@ -643,7 +620,7 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
   strcpy(tcp->localshm, redirected_filename); // hopefully this doesn't overflow :0
 
   //printf("  redirect %s\n", tcp->localshm);
-  //static char tmp[MAXPATHLEN + 1];
+  //static char tmp[PATH_MAX];
   //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
   //printf("     %s\n", tmp);
 
@@ -686,7 +663,7 @@ static void modify_syscall_two_args(struct tcb* tcp) {
     cur_regs.ecx = (long)(((char*)tcp->childshm) + len1 + 1);
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
-    //static char tmp[MAXPATHLEN + 1];
+    //static char tmp[PATH_MAX];
     //EXITIF(umovestr(tcp, (long)cur_regs.ebx, sizeof tmp, tmp) < 0);
     //printf("  ebx: %s\n", tmp);
     //EXITIF(umovestr(tcp, (long)cur_regs.ecx, sizeof tmp, tmp) < 0);
@@ -1360,7 +1337,7 @@ void CDE_end_rmdir(struct tcb* tcp) {
 // from Goanna
 #define FILEBACK 8 /* It is OK to use a file backed region. */
 
-// TODO: this is probably Linux-specific ;)
+// TODO: this is probably very Linux-specific ;)
 static void* find_free_addr(int pid, int prot, unsigned long size) {
   FILE *f;
   char filename[20];
@@ -1406,211 +1383,6 @@ static void* find_free_addr(int pid, int prot, unsigned long size) {
   fclose(f);
 
   return NULL;
-}
-
-
-// manipulating paths (courtesy of Goanna)
-
-static void empty_path(struct path *path) {
-  int pos = 0;
-  path->depth = 0;
-  if (path->stack) {
-    while (path->stack[pos]) {
-      free(path->stack[pos]);
-      path->stack[pos] = NULL;
-      pos++;
-    }
-  }
-}
-
-// mallocs a new path object, must free using delete_path(),
-// NOT using ordinary free()
-struct path* path_dup(struct path* path) {
-  struct path* ret = (struct path *)malloc(sizeof(struct path));
-  assert(ret);
-
-  ret->stacksize = path->stacksize;
-  ret->depth = path->depth;
-  ret->is_abspath = path->is_abspath;
-  ret->stack = (struct namecomp**)malloc(sizeof(struct namecomp*) * ret->stacksize);
-  assert(ret->stack);
-
-  int pos = 0;
-  while (path->stack[pos]) {
-    ret->stack[pos] =
-      (struct namecomp*)malloc(sizeof(struct namecomp) +
-                               strlen(path->stack[pos]->str) + 1);
-    assert(ret->stack[pos]);
-    ret->stack[pos]->len = path->stack[pos]->len;
-    strcpy(ret->stack[pos]->str, path->stack[pos]->str);
-    pos++;
-  }
-  ret->stack[pos] = NULL;
-  return ret;
-}
-
-struct path *new_path() {
-  struct path* ret = (struct path *)malloc(sizeof(struct path));
-  assert(ret);
-
-  ret->stacksize = 1;
-  ret->depth = 0;
-  ret->is_abspath = 0;
-  ret->stack = (struct namecomp **)malloc(sizeof(struct namecomp *));
-  assert(ret->stack);
-  ret->stack[0] = NULL;
-  return ret;
-}
-
-void delete_path(struct path *path) {
-  assert(path);
-  if (path->stack) {
-    int pos = 0;
-    while (path->stack[pos]) {
-      free(path->stack[pos]);
-      path->stack[pos] = NULL;
-      pos++;
-    }
-    free(path->stack);
-  }
-  free(path);
-}
-
-
-// mallocs a new string and populates it with up to
-// 'depth' path components (if depth is 0, uses entire path)
-char* path2str(struct path* path, int depth) {
-  int i;
-  int destlen = 1;
-
-  // simply use path->depth if depth is out of range
-  if (depth <= 0 || depth > path->depth) {
-    depth = path->depth;
-  }
-
-  for (i = 0; i < depth; i++) {
-    destlen += path->stack[i]->len + 1;
-  }
-
-  char* dest = (char *)malloc(destlen);
-
-  char* ret = dest;
-  assert(destlen >= 2);
-
-  if (path->is_abspath) {
-    *dest++ = '/';
-    destlen--;
-  }
-
-  for (i = 0; i < depth; i++) {
-    assert(destlen >= path->stack[i]->len + 1);
-
-    memcpy(dest, path->stack[i]->str, path->stack[i]->len);
-    dest += path->stack[i]->len;
-    destlen -= path->stack[i]->len;
-
-    if (i < depth - 1) { // do we have a successor?
-      assert(destlen >= 2);
-      *dest++ = '/';
-      destlen--;
-    }
-  }
-
-  *dest = '\0';
-
-  return ret;
-}
-
-// pop the last element of path
-void path_pop(struct path* p) {
-  if (p->depth == 0) {
-    return;
-  }
-
-  free(p->stack[p->depth-1]);
-  p->stack[p->depth-1] = NULL;
-  p->depth--;
-}
-
-// mallocs a new path object, must free using delete_path(),
-// NOT using ordinary free()
-struct path* str2path(char* path) {
-  int stackleft;
-
-  path = strdup(path); // so that we don't clobber the original
-  char* path_dup_base = path; // for free()
-
-  struct path* base = new_path();
-
-  if (*path == '/') { // absolute path?
-    base->is_abspath = 1;
-    empty_path(base);
-    path++;
-  }
-  else {
-    base->is_abspath = 0;
-  }
-
-  stackleft = base->stacksize - base->depth - 1;
-
-  do {
-    char *p;
-    while (stackleft <= 1) {
-      base->stacksize *= 2;
-      stackleft = base->stacksize / 2;
-      base->stacksize++;
-      stackleft++;
-      base->stack =
-        (struct namecomp **)realloc(base->stack, base->stacksize * sizeof(struct namecomp*));
-      assert(base->stack);
-    }
-
-    // Skip multiple adjoining slashes
-    while (*path == '/') {
-      path++;
-    }
-
-    p = strchr(path, '/');
-    // put a temporary stop-gap ... uhhh, this assumes path isn't read-only
-    if (p) {
-      *p = '\0';
-    }
-
-    if (path[0] == '\0') {
-      base->stack[base->depth] = NULL;
-      // We are at the end (or root), do nothing.
-    }
-    else if (!strcmp(path, ".")) {
-      base->stack[base->depth] = NULL;
-      // This doesn't change anything.
-    }
-    else if (!strcmp(path, "..")) {
-      if (base->depth > 0) {
-        free(base->stack[--base->depth]);
-        base->stack[base->depth] = NULL;
-        stackleft++;
-      }
-    }
-    else {
-      base->stack[base->depth] =
-        (struct namecomp *)malloc(sizeof(struct namecomp) + strlen(path) + 1);
-      assert(base->stack[base->depth]);
-      strcpy(base->stack[base->depth]->str, path);
-      base->stack[base->depth]->len = strlen(path);
-      base->depth++;
-      base->stack[base->depth] = NULL;
-      stackleft--;
-    }
-
-    // Put it back the way it was
-    if (p) {
-      *p++ = '/';
-    }
-    path = p;
-  } while (path);
-
-  free(path_dup_base);
-  return base;
 }
 
 
@@ -1738,7 +1510,7 @@ void strcpy_redirected_cderoot(char* dst, char* src) {
 
 // malloc a new string from child
 static char* strcpy_from_child(struct tcb* tcp, long addr) {
-  char path[MAXPATHLEN + 1];
+  char path[PATH_MAX];
   EXITIF(umovestr(tcp, addr, sizeof path, path) < 0);
   return strdup(path);
 }
@@ -1806,7 +1578,7 @@ void CDE_create_path_symlink_dirs() {
   char *p;
   int m, n;
   struct stat st;
-  char tmp_buf[MAXPATHLEN];
+  char tmp_buf[PATH_MAX];
 
   for (p = getenv("PATH"); p && *p; p += m) {
     if (strchr(p, ':')) {
