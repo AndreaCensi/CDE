@@ -239,7 +239,6 @@ static void copy_file_into_cde_root(char* filename) {
     char* filename_copy = strdup(filename); // dirname() destroys its arg
     char* dir = dirname(filename_copy);
 
-    // resolve the realpath() of dir
     char* dir_realpath = realpath_strdup(dir);
 
     char* symlink_loc_in_package = prepend_cderoot(filename_abspath);

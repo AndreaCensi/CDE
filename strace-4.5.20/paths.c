@@ -15,7 +15,9 @@ extern char* format(const char *format, ...);
 char* realpath_strdup(char* filename) {
   char path[PATH_MAX];
   path[0] = '\0';
-  realpath(filename, path);
+  char* ret = realpath(filename, path);
+  assert(ret); // the target path must actually exist!
+
   assert(path[0] == '/'); // must be an absolute path
   return strdup(path);
 }
@@ -290,6 +292,7 @@ char* realpath_nofollow(char* filename, char* relative_path_basedir) {
 
     char* dir_realpath = realpath_strdup(dir);
     ret = format("%s/%s", dir_realpath, bn);
+
     free(dir_realpath);
     free(tmp_copy);
     free(tmp);
