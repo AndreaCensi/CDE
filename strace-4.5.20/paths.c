@@ -8,6 +8,8 @@
 // See: http://www.trevorpounds.com/blog/?p=103
 __asm__(".symver realpath,realpath@GLIBC_2.0");
 
+#include <stdarg.h>
+extern char* format(const char *format, ...);
 
 // mallocs a new string
 char* realpath_strdup(char* filename) {
@@ -32,9 +34,19 @@ char* readlink_strdup(char* filename) {
 }
 
 
-// manipulating paths (courtesy of Goanna)
+// representing and manipulating path components (courtesy of Goanna)
 
-static void empty_path(struct path *path);
+static void empty_path(struct path *path) {
+  int pos = 0;
+  path->depth = 0;
+  if (path->stack) {
+    while (path->stack[pos]) {
+      free(path->stack[pos]);
+      path->stack[pos] = NULL;
+      pos++;
+    }
+  }
+}
 
 
 // pop the last element of path
@@ -127,18 +139,6 @@ struct path* str2path(char* path) {
 
   free(path_dup_base);
   return base;
-}
-
-static void empty_path(struct path *path) {
-  int pos = 0;
-  path->depth = 0;
-  if (path->stack) {
-    while (path->stack[pos]) {
-      free(path->stack[pos]);
-      path->stack[pos] = NULL;
-      pos++;
-    }
-  }
 }
 
 // mallocs a new path object, must free using delete_path(),
@@ -239,4 +239,112 @@ char* path2str(struct path* path, int depth) {
   return ret;
 }
 
+
+// emulate "mkdir -p" functionality
+// if pop_one is non-zero, then pop last element
+// before doing "mkdir -p"
+void mkdir_recursive(char* fullpath, int pop_one) {
+  struct path* p = str2path(fullpath);
+
+  if (pop_one) {
+    path_pop(p); // e.g., ignore filename portion to leave just the dirname
+  }
+
+  int i;
+  for (i = 1; i <= p->depth; i++) {
+    char* dn = path2str(p, i);
+    mkdir(dn, 0777);
+    free(dn);
+  }
+  delete_path(p);
+}
+
+
+// gets the absolute path of filename, WITHOUT following any symlinks
+// (for relative paths, calculate their locations relative to
+//  relative_path_basedir)
+//
+// mallocs a new string
+char* realpath_nofollow(char* filename, char* relative_path_basedir) {
+  assert(IS_ABSPATH(relative_path_basedir));
+
+  char* ret = NULL;
+  if (IS_ABSPATH(filename)) {
+    char* bn = basename(filename); // doesn't destroy its arg
+
+    char* filename_copy = strdup(filename); // dirname() destroys its arg
+    char* dir = dirname(filename_copy);
+
+    char* dir_realpath = realpath_strdup(dir);
+    ret = format("%s/%s", dir_realpath, bn);
+    free(dir_realpath);
+    free(filename_copy);
+  }
+  else {
+    // for relative links, find them with respect to relative_path_basedir
+    char* tmp = format("%s/%s", relative_path_basedir, filename);
+    char* bn = basename(tmp); // doesn't destroy its arg
+
+    char* tmp_copy = strdup(tmp); // dirname() destroys its arg
+    char* dir = dirname(tmp_copy);
+
+    char* dir_realpath = realpath_strdup(dir);
+    ret = format("%s/%s", dir_realpath, bn);
+    free(dir_realpath);
+    free(tmp_copy);
+    free(tmp);
+  }
+
+  assert(ret);
+  return ret;
+}
+
+
+// return 1 iff the absolute path of filename is within target_dir
+// (for relative paths, calculate their locations relative to
+//  relative_path_basedir)
+int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir) {
+  assert(IS_ABSPATH(relative_path_basedir));
+
+  char* path_to_check = NULL;
+  if (IS_ABSPATH(filename)) {
+    path_to_check = strdup(filename);
+  }
+  else {
+    // note that the target program might have done a chdir, so we need to handle that ;)
+    path_to_check = format("%s/%s", relative_path_basedir, filename);
+  }
+  assert(path_to_check);
+
+  // just do a substring comparison against target_dir
+  char* path_to_check_copy = strdup(path_to_check);
+  char* dn = dirname(path_to_check_copy);
+
+  char* dn_realpath = realpath_strdup(dn);
+  int dn_len = strlen(dn_realpath);
+
+  char* targetdir_realpath = realpath_strdup(target_dir);
+  int targetdir_len = strlen(targetdir_realpath);
+
+  // special case hack - if dn_realpath ends with '/.', then take its dirname
+  // AGAIN to get rid of this annoyance :)
+  while ((dn_len >= 2) &&
+          dn_realpath[dn_len - 2] == '/' &&
+          dn_realpath[dn_len - 1] == '.') {
+    dn_realpath = dirname(dn_realpath);
+    dn_len = strlen(dn_realpath);
+  }
+
+  char is_within_pwd = 0;
+  if ((targetdir_len <= dn_len) && strncmp(dn_realpath, targetdir_realpath, targetdir_len) == 0) {
+    is_within_pwd = 1;
+  }
+
+  free(path_to_check);
+  free(path_to_check_copy);
+  free(dn_realpath);
+  free(targetdir_realpath);
+
+  return is_within_pwd;
+}
 

@@ -23,8 +23,6 @@ char starting_pwd[PATH_MAX];
 char child_current_pwd[PATH_MAX];
 
 // to shut up gcc warnings without going thru #include hell
-extern char* basename(const char *fname);
-extern char *dirname(char *path);
 extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
 // maps relative paths to their locations within cde-root/
@@ -70,9 +68,7 @@ void CDE_init_relpaths(void) {
 // useful utility function from ccache codebase
 // http://ccache.samba.org/
 /* Construct a string according to a format. Caller frees. */
-char *
-format(const char *format, ...)
-{
+char* format(const char *format, ...) {
   va_list ap;
   char *ptr = NULL;
 
@@ -93,25 +89,6 @@ char* prepend_cderoot(char* path) {
   strcpy(ret, CDE_ROOT);
   strcat(ret, path);
   return ret;
-}
-
-
-// emulate "mkdir -p" functionality
-// if pop_one is non-zero, then pop last element first
-static void mkdir_recursive(char* fullpath, int pop_one) {
-  struct path* p = str2path(fullpath);
-
-  if (pop_one) {
-    path_pop(p); // ignore filename portion to leave just the dirname
-  }
-
-  int i;
-  for (i = 1; i <= p->depth; i++) {
-    char* dn = path2str(p, i);
-    mkdir(dn, 0777);
-    free(dn);
-  }
-  delete_path(p);
 }
 
 
@@ -140,88 +117,9 @@ static int ignore_path(char* filename) {
   return 0;
 }
 
-// gets the absolute path of filename relative to child_current_pwd
-// (for a relative path), WITHOUT following any symlinks
-//
-// mallocs a new string
-// WARNING: clobbers 'path' static var!!!
-static char* realpath_nofollow(char* filename) {
-  // only call this function when NOT in CDE_exec_mode, since when we're
-  // in CDE_exec_mode, we're likely on someone else's machine, so
-  // relative paths will resolve to different absolute paths, eek!
-  assert(!CDE_exec_mode);
-
-  char* ret = NULL;
-  if (IS_ABSPATH(filename)) {
-    char* bn = basename(filename); // doesn't destroy its arg
-
-    char* filename_copy = strdup(filename); // dirname() destroys its arg
-    char* dir = dirname(filename_copy);
-
-    char* dir_realpath = realpath_strdup(dir);
-    ret = format("%s/%s", dir_realpath, bn);
-    free(dir_realpath);
-    free(filename_copy);
-  }
-  else {
-    // for relative links, find them with respect to child_current_pwd
-    char* tmp = format("%s/%s", child_current_pwd, filename);
-    char* bn = basename(tmp); // doesn't destroy its arg
-
-    char* tmp_copy = strdup(tmp); // dirname() destroys its arg
-    char* dir = dirname(tmp_copy);
-
-    char* dir_realpath = realpath_strdup(dir);
-    ret = format("%s/%s", dir_realpath, bn);
-    free(dir_realpath);
-    free(tmp_copy);
-    free(tmp);
-  }
-
-  assert(ret);
-  return ret;
-}
-
-
 // return 1 iff the absolute path of filename is within the ORIGINAL pwd
 static int file_is_within_starting_pwd(char* filename) {
-  char* path_to_check = NULL;
-
-  if (IS_ABSPATH(filename)) {
-    path_to_check = strdup(filename);
-  }
-  else {
-    // note that the target program might have done a chdir, so we need to handle that ;)
-    path_to_check = format("%s/%s", child_current_pwd, filename);
-  }
-  assert(path_to_check);
-
-  // just do a substring comparison against starting_pwd
-  char* path_to_check_copy = strdup(path_to_check);
-  char* dn = dirname(path_to_check_copy);
-  char* dn_realpath = realpath_strdup(dn);
-
-  int dn_len = strlen(dn_realpath);
-  int pwd_len = strlen(starting_pwd);
-
-  // special case hack - if dn_realpath ends with '/.', then take its dirname
-  // AGAIN to get rid of this annoyance :)
-  while ((dn_len >= 2) &&
-          dn_realpath[dn_len - 2] == '/' &&
-          dn_realpath[dn_len - 1] == '.') {
-    dn_realpath = dirname(dn_realpath);
-    dn_len = strlen(dn_realpath);
-  }
-
-  char is_within_pwd = 0;
-  if ((pwd_len <= dn_len) && strncmp(dn_realpath, starting_pwd, pwd_len) == 0) {
-    is_within_pwd = 1;
-  }
-
-  free(path_to_check_copy);
-  free(path_to_check);
-  free(dn_realpath);
-  return is_within_pwd;
+  return file_is_within_dir(filename, starting_pwd, child_current_pwd);
 }
 
 
@@ -268,7 +166,7 @@ static void copy_file_into_cde_root(char* filename) {
 
   // resolve absolute path relative to child_current_pwd and
   // get rid of '..', '.', and other weird symbols
-  char* filename_abspath = realpath_nofollow(filename);
+  char* filename_abspath = realpath_nofollow(filename, child_current_pwd);
   char* dst_path = prepend_cderoot(filename_abspath);
 
 
@@ -403,7 +301,7 @@ static void copy_file_into_cde_root(char* filename) {
 
     // ok, let's get the absolute path without any '..' or '.' funniness
     // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
-    char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath);
+    char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath, child_current_pwd);
     char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
     //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
     //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
@@ -1506,7 +1404,6 @@ void strcpy_redirected_cderoot(char* dst, char* src) {
     strcpy(dst, src);
   }
 }
-
 
 // malloc a new string from child
 static char* strcpy_from_child(struct tcb* tcp, long addr) {

@@ -9,15 +9,24 @@
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 
 // quick check for whether a path is absolute
 #define IS_ABSPATH(p) (p[0] == '/')
 
+// to shut up gcc warnings without going thru #include hell
+extern char* basename(const char *fname);
+extern char *dirname(char *path);
+
 
 char* realpath_strdup(char* filename);
 char* readlink_strdup(char* filename);
 
+char* realpath_nofollow(char* filename, char* relative_path_basedir);
+int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir);
+
+void mkdir_recursive(char* fullpath, int pop_one);
 
 // adapted from Goanna project
 
