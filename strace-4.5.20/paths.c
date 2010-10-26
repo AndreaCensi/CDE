@@ -3,6 +3,8 @@
 
 #include "paths.h"
 
+extern char CDE_exec_mode;
+
 // This forces gcc to use an older version of realpath from glibc 2.0,
 // to maximize backwards compatibility
 // See: http://www.trevorpounds.com/blog/?p=103
@@ -11,8 +13,13 @@ __asm__(".symver realpath,realpath@GLIBC_2.0");
 #include <stdarg.h>
 extern char* format(const char *format, ...);
 
+// calls realpath and mallocs a new result string
+// Pre-req: filename must actually exist on the filesystem!
+//
 // mallocs a new string
 char* realpath_strdup(char* filename) {
+  assert(!CDE_exec_mode);
+  
   char path[PATH_MAX];
   path[0] = '\0';
   char* ret = realpath(filename, path);
@@ -24,8 +31,9 @@ char* realpath_strdup(char* filename) {
 
 // mallocs a new string
 char* readlink_strdup(char* filename) {
-  char path[PATH_MAX];
+  assert(!CDE_exec_mode);
 
+  char path[PATH_MAX];
   path[0] = '\0';
   int len = readlink(filename, path, sizeof path);
   assert(path[0] != '\0');
@@ -268,6 +276,7 @@ void mkdir_recursive(char* fullpath, int pop_one) {
 //
 // mallocs a new string
 char* realpath_nofollow(char* filename, char* relative_path_basedir) {
+  assert(!CDE_exec_mode);
   assert(IS_ABSPATH(relative_path_basedir));
 
   char* ret = NULL;
@@ -306,7 +315,10 @@ char* realpath_nofollow(char* filename, char* relative_path_basedir) {
 // return 1 iff the absolute path of filename is within target_dir
 // (for relative paths, calculate their locations relative to
 //  relative_path_basedir)
+//
+// Pre-req: filename must actually exist on the filesystem!
 int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir) {
+  assert(!CDE_exec_mode);
   assert(IS_ABSPATH(relative_path_basedir));
 
   char* path_to_check = NULL;

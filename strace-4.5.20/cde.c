@@ -104,6 +104,9 @@ static int ignore_path(char* filename) {
 
 // return 1 iff the absolute path of filename is within the ORIGINAL pwd
 static int file_is_within_starting_pwd(char* filename) {
+  assert(!CDE_exec_mode); // it's unsafe to attempt this in exec mode
+                          // since paths might be totally different on
+                          // guest machine
   return file_is_within_dir(filename, starting_pwd, child_current_pwd);
 }
 
@@ -583,39 +586,49 @@ static char* redirect_filename(char* filename) {
     return NULL;
   }
 
-  if (!file_is_within_starting_pwd(filename)) {
-    if (IS_ABSPATH(filename)) {
-      // easy case: absolute path, just do a plain redirect :)
-      return prepend_cderoot(filename);
+  if (IS_ABSPATH(filename)) {
+    // easy case: absolute path, just do a plain redirect :)
+    return prepend_cderoot(filename);
+
+    // TODO: we currently don't properly handle ABSOLUTE paths that are
+    // actually within pwd ... those should NOT be redirected
+  }
+  else {
+    // relative path ... if it doesn't start with "../", assume that
+    // it's within pwd so NO redirection is needed
+    int len = strlen(filename);
+    if ((len < 3) || (strncmp(filename, "../", 3) != 0)) {
+      return NULL;
     }
-    else {
-      // hard case: relative path ... consult relpath_map to do redirection
-      char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
-      char* rel_dir = dirname(rel_filename_copy);
 
-      char* bn = basename(filename); // doesn't destroy its arg
+    // hard case: relative path OUTSIDE of pwd ...
+    // consult relpath_map to do redirection
+    char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
+    char* rel_dir = dirname(rel_filename_copy);
 
-      int i;
-      int found = 0;
-      char* dst_dir = NULL;
-      for (i = 0; i < relpath_map_size; i++) {
-        if (strcmp(relpath_map[i].src, rel_dir) == 0) {
-          dst_dir = relpath_map[i].tgt;
-          found = 1;
-          break;
-        }
+    char* bn = basename(filename); // doesn't destroy its arg
+
+    int i;
+    int found = 0;
+    char* dst_dir = NULL;
+    for (i = 0; i < relpath_map_size; i++) {
+      if (strcmp(relpath_map[i].src, rel_dir) == 0) {
+        dst_dir = relpath_map[i].tgt;
+        found = 1;
+        break;
       }
-
-      // if we can't find the path in relpath_map, then we're screwed!!!
-      assert(found && dst_dir);
-
-      char* dst_path = format("%s/%s", dst_dir, bn);
-
-      free(rel_filename_copy);
-      return dst_path;
     }
+
+    // if we can't find the path in relpath_map, then we're screwed!!!
+    assert(found && dst_dir);
+
+    char* dst_path = format("%s/%s", dst_dir, bn);
+
+    free(rel_filename_copy);
+    return dst_path;
   }
 
+  assert(0); // shouldn't reach here
   return NULL;
 }
 
