@@ -14,10 +14,11 @@ def generic_lib_checks():
   assert os.path.islink('cde-root/lib/libc.so.6')
   assert os.readlink('cde-root/lib/libc.so.6') == 'libc-2.8.so'
 
-def run_cde(argv):
+def run_cde(argv, silent=False):
   (stdout, stderr) = Popen([CDE_BIN] + argv, stdout=PIPE, stderr=PIPE).communicate()
-  if stderr: 
-    print "stderr:", stderr
+  if not silent:
+    if stderr: 
+      print "stderr:", stderr
   return (stdout, stderr)
 
 def run_and_cmp_cde_exec(argv, prev_stdout, prev_stderr):
