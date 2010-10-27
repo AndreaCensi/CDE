@@ -22,6 +22,9 @@ static void create_symlink_in_cde_root(char* filename, char is_regular_file);
 // the getcwd() system call always reflects the latest state, taking
 // into account changes due to chdir()
 //
+// DON'T try to spoof getcwd when running in CDE_exec_mode ... always
+// return the true cwd on the guest machine ...
+//
 // the pwd at the START of execution
 // (the target program might alter it later with a chdir syscall!)
 char starting_pwd[PATH_MAX];
@@ -105,9 +108,6 @@ static int ignore_path(char* filename) {
 }
 
 static int file_is_within_starting_pwd(char* filename) {
-  assert(!CDE_exec_mode); // it's unsafe to attempt this in exec mode
-                          // since paths might be totally different on
-                          // guest machine
   return file_is_within_dir(filename, starting_pwd, child_current_pwd);
 }
 
@@ -505,6 +505,7 @@ static char* redirect_filename(char* filename) {
     return NULL;
   }
 
+  // TODO: redirect to use file_is_within_starting_pwd() instead ...
   if (IS_ABSPATH(filename)) {
     // easy case: absolute path, just do a plain redirect :)
     return prepend_cderoot(filename);
@@ -1083,24 +1084,21 @@ void CDE_begin_chdir(struct tcb* tcp) {
 void CDE_end_chdir(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
-  if (CDE_exec_mode) {
-    // TODO: update child_current_pwd (taking into account path
-    // differences on guest machine)
-    //printf("CDE_end_chdir %s\n", tcp->opened_filename);
-  }
-  else {
-    if (tcp->u_rval == 0) {
+  // only do this on success
+  if (tcp->u_rval == 0) {
+    // update child_current_pwd
+
+    // TODO: is this the right thing to do here???
+    char* tmp = canonicalize_path(tcp->opened_filename, child_current_pwd);
+    strcpy(child_current_pwd, tmp);
+    free(tmp);
+
+    if (!CDE_exec_mode) {
       char* redirected_path = redirect_filename(tcp->opened_filename);
       if (redirected_path) {
         mkdir_recursive(redirected_path, 0);
         free(redirected_path);
       }
-
-      // update child_current_pwd
-      char* tmp = realpath_strdup(tcp->opened_filename);
-      strcpy(child_current_pwd, tmp);
-      free(tmp);
-      //printf("  chdir %s\n", child_current_pwd);
     }
   }
 
@@ -1373,20 +1371,14 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
 
 
 void CDE_end_getcwd(struct tcb* tcp) {
+  // DON'T try to spoof getcwd when running in CDE_exec_mode
+  // always return the true cwd on the guest machine
+  // and update child_current_pwd
   if (!syserror(tcp)) {
-    if (CDE_exec_mode) {
-      // TODO: we don't account for the child doing chdir()!!!
-      // If we want to account for that, we need to instrument
-      // CDE_end_chdir to update child_current_pwd
-      char* saved_pwd = getenv("PWD");
-      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], saved_pwd, strlen(saved_pwd) + 1);
-
-      //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
-      //printf("CDE_end_getcwd %s\n", tmp);
-      //free(tmp);
-    }
-    else {
-    }
+    char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
+    strcpy(child_current_pwd, tmp);
+    //printf("CDE_end_getcwd %s\n", tmp);
+    free(tmp);
   }
 }
 

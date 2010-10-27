@@ -852,7 +852,8 @@ main(int argc, char *argv[])
   // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
 	progname = argv[0] ? argv[0] : "cde";
 
-  getcwd(starting_pwd, sizeof starting_pwd); // initialize pwd!
+  // initialize pwd to their TRUE values (don't spoof them on guest machine)
+  getcwd(starting_pwd, sizeof starting_pwd);
   getcwd(child_current_pwd, sizeof child_current_pwd);
 
   if (strcmp(basename(progname), "cde-exec") == 0) {
