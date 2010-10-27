@@ -13,6 +13,7 @@ __asm__(".symver realpath,realpath@GLIBC_2.0");
 #include <stdarg.h>
 extern char* format(const char *format, ...);
 
+static struct path* new_path(char is_abspath);
 
 // note that realpath_strdup and realpath_nofollow seem to do funny
 // things to arguments that are directories (okay for regular files,
@@ -75,23 +76,17 @@ void path_pop(struct path* p) {
   p->depth--;
 }
 
-// mallocs a new path object, must free using delete_path(),
-// NOT using ordinary free()
-struct path* str2path(char* path) {
+static struct path* new_path_internal(char* path, char is_abspath) {
   int stackleft;
 
   path = strdup(path); // so that we don't clobber the original
   char* path_dup_base = path; // for free()
 
-  struct path* base = new_path();
+  struct path* base = new_path(is_abspath);
 
-  if (*path == '/') { // absolute path?
-    base->is_abspath = 1;
+  if (is_abspath) {
     empty_path(base);
     path++;
-  }
-  else {
-    base->is_abspath = 0;
   }
 
   stackleft = base->stacksize - base->depth - 1;
@@ -156,39 +151,56 @@ struct path* str2path(char* path) {
   return base;
 }
 
+
+// creates a canonicalized path object by removing all instances of '.'
+// and '..' from an absolute path
+//
 // mallocs a new path object, must free using delete_path(),
 // NOT using ordinary free()
-struct path* path_dup(struct path* path) {
-  struct path* ret = (struct path *)malloc(sizeof(struct path));
-  assert(ret);
+struct path* new_path_from_abspath(char* path) {
+  assert(IS_ABSPATH(path));
+  return new_path_internal(path, 1);
+}
 
-  ret->stacksize = path->stacksize;
-  ret->depth = path->depth;
-  ret->is_abspath = path->is_abspath;
-  ret->stack = (struct namecomp**)malloc(sizeof(struct namecomp*) * ret->stacksize);
-  assert(ret->stack);
+// creates a path object from a relative path, resolving it relative to
+// base, which must be an absolute path
+//
+// mallocs a new path object, must free using delete_path(),
+// NOT using ordinary free()
+struct path* new_path_from_relpath(char* relpath, char* base) {
+  assert(!IS_ABSPATH(relpath));
+  assert(IS_ABSPATH(base));
 
-  int pos = 0;
-  while (path->stack[pos]) {
-    ret->stack[pos] =
-      (struct namecomp*)malloc(sizeof(struct namecomp) +
-                               strlen(path->stack[pos]->str) + 1);
-    assert(ret->stack[pos]);
-    ret->stack[pos]->len = path->stack[pos]->len;
-    strcpy(ret->stack[pos]->str, path->stack[pos]->str);
-    pos++;
-  }
-  ret->stack[pos] = NULL;
+  char* tmp = format("%s/%s", base, relpath);
+  struct path* ret = new_path_from_abspath(tmp);
+
+  free(tmp);
   return ret;
 }
 
-struct path *new_path() {
+// canonicalizes an absolute path, mallocs a new string
+char* canonicalize_abspath(char* abspath) {
+  struct path* p = new_path_from_abspath(abspath);
+  char* ret = path2str(p, 0);
+  delete_path(p);
+  return ret;
+}
+
+// canonicalizes a relative path with respect to base, mallocs a new string
+char* canonicalize_relpath(char* relpath, char* base) {
+  struct path* p = new_path_from_relpath(relpath, base);
+  char* ret = path2str(p, 0);
+  delete_path(p);
+  return ret;
+}
+
+static struct path* new_path(char is_abspath) {
   struct path* ret = (struct path *)malloc(sizeof(struct path));
   assert(ret);
 
   ret->stacksize = 1;
+  ret->is_abspath = is_abspath;
   ret->depth = 0;
-  ret->is_abspath = 0;
   ret->stack = (struct namecomp **)malloc(sizeof(struct namecomp *));
   assert(ret->stack);
   ret->stack[0] = NULL;
@@ -214,7 +226,7 @@ void delete_path(struct path *path) {
 // 'depth' path components (if depth is 0, uses entire path)
 char* path2str(struct path* path, int depth) {
   int i;
-  int destlen = 1;
+  int destlen = 2; // at least have room for '/' and null terminator ('\0')
 
   // simply use path->depth if depth is out of range
   if (depth <= 0 || depth > path->depth) {
@@ -228,8 +240,8 @@ char* path2str(struct path* path, int depth) {
   char* dest = (char *)malloc(destlen);
 
   char* ret = dest;
-  assert(destlen >= 2);
 
+  // print a leading '/' for absolute paths
   if (path->is_abspath) {
     *dest++ = '/';
     destlen--;
@@ -259,7 +271,9 @@ char* path2str(struct path* path, int depth) {
 // if pop_one is non-zero, then pop last element
 // before doing "mkdir -p"
 void mkdir_recursive(char* fullpath, int pop_one) {
-  struct path* p = str2path(fullpath);
+  // use a sneaky new_path_internal call so that we can accept relative
+  // paths in fullpath
+  struct path* p = new_path_internal(fullpath, IS_ABSPATH(fullpath));
 
   if (pop_one) {
     path_pop(p); // e.g., ignore filename portion to leave just the dirname
@@ -325,8 +339,71 @@ char* realpath_nofollow(char* filename, char* relative_path_basedir) {
 // (for relative paths, calculate their locations relative to
 //  relative_path_basedir)
 //
+// WARNING: this does WEIRD things if filename isn't a file but rather
+// it's a directory.  e.g., "/home/pgbovine" is NOT within "/home/pgbovine"
+// since, technically a file named 'pgbovine' is NOT within "/home/pgbovine"
+//
+// in short, ONLY PASS IN FILES as filename, NOT directories
+//
 // Pre-req: filename must actually exist on the filesystem!
 int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir) {
+  char* fake_cano_dir = canonicalize_abspath(target_dir);
+  char* cano_filename = NULL;
+  if (IS_ABSPATH(filename)) {
+    cano_filename = canonicalize_abspath(filename);
+  }
+  else {
+    cano_filename = canonicalize_relpath(filename, relative_path_basedir);
+  }
+  assert(cano_filename);
+  int cano_filename_len = strlen(cano_filename);
+
+  // very subtle --- if fake_cano_dir isn't simply '/' (root directory),
+  // tack on a '/' to the end of fake_cano_dir, so that we
+  // don't get misled by substring comparisons.  canonicalize_abspath
+  // does NOT put on a trailing '/' for directories.
+  //
+  // e.g., "/home/pgbovine/hello.txt" is NOT within the
+  // "/home/pgbovine/hello" directory, so we need to tack on an extra
+  // '/' to the end of cano_dir to make it "/home/pgbovine/hello/" in
+  // order to avoid a false match
+  int fake_cano_dir_len = strlen(fake_cano_dir);
+
+  char* cano_dir = NULL;
+  if (fake_cano_dir_len > 1) {
+    cano_dir = (char*)malloc(fake_cano_dir_len + 2);
+    strcpy(cano_dir, fake_cano_dir);
+    cano_dir[fake_cano_dir_len] = '/';
+    cano_dir[fake_cano_dir_len + 1] = '\0';
+  }
+  else {
+    cano_dir = strdup(fake_cano_dir);
+  }
+  assert(cano_dir);
+
+  int cano_dir_len = strlen(cano_dir);
+
+  // now that they are canonicalized, we can do a simple substring comparison:
+  char is_within_pwd = 0;
+  if ((cano_dir_len <= cano_filename_len) &&
+      (strncmp(cano_dir, cano_filename, cano_dir_len) == 0)) {
+    is_within_pwd = 1;
+  }
+
+  free(fake_cano_dir);
+  free(cano_dir);
+  free(cano_filename);
+
+  return is_within_pwd;
+}
+
+#ifdef PGBOVINE_DEPRECATED
+// return 1 iff the absolute path of filename is within target_dir
+// (for relative paths, calculate their locations relative to
+//  relative_path_basedir)
+//
+// Pre-req: filename must actually exist on the filesystem!
+int file_is_within_dir_OLD(char* filename, char* target_dir, char* relative_path_basedir) {
   assert(!CDE_exec_mode);
   assert(IS_ABSPATH(relative_path_basedir));
 
@@ -371,6 +448,7 @@ int file_is_within_dir(char* filename, char* target_dir, char* relative_path_bas
 
   return is_within_pwd;
 }
+#endif // PGBOVINE_DEPRECATED
 
 
 // useful utility function from ccache codebase

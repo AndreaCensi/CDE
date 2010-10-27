@@ -99,7 +99,6 @@ static int ignore_path(char* filename) {
   return 0;
 }
 
-// return 1 iff the absolute path of filename is within the ORIGINAL pwd
 static int file_is_within_starting_pwd(char* filename) {
   assert(!CDE_exec_mode); // it's unsafe to attempt this in exec mode
                           // since paths might be totally different on
@@ -145,6 +144,8 @@ static void copy_file_into_cde_root(char* filename) {
   }
 
   // don't do anything for files inside of pwd :)
+  //
+  // TODO: this doesn't do the right thing if filename refers to a DIRECTORY 
   if (file_is_within_starting_pwd(filename)) {
     return;
   }
@@ -167,7 +168,7 @@ static void copy_file_into_cde_root(char* filename) {
 
   // for now, just handle absolute paths
   if (IS_ABSPATH(filename)) {
-    struct path* p = str2path(filename);
+    struct path* p = new_path_from_abspath(filename);
 
     int i;
     // go up to depth - 1 to ignore last component
@@ -1519,7 +1520,7 @@ static void create_symlink_in_cde_root(char* filename, char is_regular_file) {
     // to insert in the original absolute path, in order to make the
     // symlink in the CDE package a RELATIVE path starting from
     // the cde-root/ base directory
-    struct path* p = str2path(dir_realpath);
+    struct path* p = new_path_from_abspath(dir_realpath);
     char tmp[PATH_MAX];
     if (p->depth > 0) {
       strcpy(tmp, "..");

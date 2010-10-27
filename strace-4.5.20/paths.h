@@ -29,6 +29,7 @@ char* realpath_strdup(char* filename);
 char* readlink_strdup(char* filename);
 
 char* realpath_nofollow(char* filename, char* relative_path_basedir);
+
 int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir);
 
 void mkdir_recursive(char* fullpath, int pop_one);
@@ -44,16 +45,19 @@ struct namecomp {
 struct path {
   int stacksize; // num elts in stack
   int depth;     // actual depth of path (smaller than stacksize)
-  int is_abspath; // 1 if absolute path (starts with '/'), 0 if relative path
+  int is_abspath; // 1 if this represents an absolute path, 0 otherwise
   struct namecomp **stack;
 };
 
-struct path* str2path(char* path);
+
+char* canonicalize_abspath(char* abspath);
+char* canonicalize_relpath(char* relpath, char* base);
+
+struct path* new_path_from_abspath(char* path);
+struct path* new_path_from_relpath(char* relpath, char* base);
+
 char* path2str(struct path* path, int depth);
-struct path* path_dup(struct path* path);
-struct path *new_path();
 void delete_path(struct path *path);
-void path_pop(struct path* p);
 
 
 #endif // _PATHS_H
