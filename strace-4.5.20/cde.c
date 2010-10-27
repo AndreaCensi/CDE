@@ -199,7 +199,7 @@ static void copy_file_into_cde_root(char* filename) {
 
   // resolve absolute path relative to child_current_pwd and
   // get rid of '..', '.', and other weird symbols
-  char* filename_abspath = realpath_nofollow(filename, child_current_pwd);
+  char* filename_abspath = canonicalize_path(filename, child_current_pwd);
   char* dst_path = prepend_cderoot(filename_abspath);
 
   //printf("copy_file_into_cde_root %s %s\n", filename, dst_path);
@@ -1499,7 +1499,7 @@ void CDE_create_path_symlink_dirs() {
 // and copy over the symlink's target into CDE_ROOT as well
 // Pre-req: f must be an absolute path to a symlink
 static void create_symlink_in_cde_root(char* filename, char is_regular_file) {
-  char* filename_abspath = realpath_nofollow(filename, child_current_pwd);
+  char* filename_abspath = canonicalize_path(filename, child_current_pwd);
 
   // target file must exist, so let's resolve its name
   char* orig_symlink_target = readlink_strdup(filename_abspath);
@@ -1557,7 +1557,7 @@ static void create_symlink_in_cde_root(char* filename, char is_regular_file) {
 
   // ok, let's get the absolute path without any '..' or '.' funniness
   // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
-  char* symlink_dst_tmp_path = realpath_nofollow(symlink_target_abspath, child_current_pwd);
+  char* symlink_dst_tmp_path = canonicalize_abspath(symlink_target_abspath);
   char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
   //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
   //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);

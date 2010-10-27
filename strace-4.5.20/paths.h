@@ -28,7 +28,7 @@ char* format(const char *format, ...);
 char* realpath_strdup(char* filename);
 char* readlink_strdup(char* filename);
 
-char* realpath_nofollow(char* filename, char* relative_path_basedir);
+char* realpath_nofollow_DEPRECATED(char* filename, char* relative_path_basedir);
 
 int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir);
 
@@ -52,6 +52,7 @@ struct path {
 
 char* canonicalize_abspath(char* abspath);
 char* canonicalize_relpath(char* relpath, char* base);
+char* canonicalize_path(char* path, char* relpath_base);
 
 struct path* new_path_from_abspath(char* path);
 struct path* new_path_from_relpath(char* relpath, char* base);

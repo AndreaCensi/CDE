@@ -194,6 +194,16 @@ char* canonicalize_relpath(char* relpath, char* base) {
   return ret;
 }
 
+char* canonicalize_path(char* path, char* relpath_base) {
+  if (IS_ABSPATH(path)) {
+    return canonicalize_abspath(path);
+  }
+  else {
+    return canonicalize_relpath(path, relpath_base);
+  }
+}
+
+
 static struct path* new_path(char is_abspath) {
   struct path* ret = (struct path *)malloc(sizeof(struct path));
   assert(ret);
@@ -288,7 +298,7 @@ void mkdir_recursive(char* fullpath, int pop_one) {
   delete_path(p);
 }
 
-
+#ifdef PGBOVINE_DEPRECATED
 // gets the absolute path of filename, WITHOUT following any symlinks
 // (for relative paths, calculate their locations relative to
 //  relative_path_basedir)
@@ -298,7 +308,7 @@ void mkdir_recursive(char* fullpath, int pop_one) {
 // specified by the (basename of) file
 //
 // mallocs a new string
-char* realpath_nofollow(char* filename, char* relative_path_basedir) {
+char* realpath_nofollow_DEPRECATED(char* filename, char* relative_path_basedir) {
   assert(!CDE_exec_mode);
   assert(IS_ABSPATH(relative_path_basedir));
 
@@ -333,6 +343,7 @@ char* realpath_nofollow(char* filename, char* relative_path_basedir) {
   assert(ret);
   return ret;
 }
+#endif // PGBOVINE_DEPRECATED
 
 
 // return 1 iff the absolute path of filename is within target_dir
@@ -347,17 +358,10 @@ char* realpath_nofollow(char* filename, char* relative_path_basedir) {
 //
 // Pre-req: filename must actually exist on the filesystem!
 int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir) {
-  char* fake_cano_dir = canonicalize_abspath(target_dir);
-  char* cano_filename = NULL;
-  if (IS_ABSPATH(filename)) {
-    cano_filename = canonicalize_abspath(filename);
-  }
-  else {
-    cano_filename = canonicalize_relpath(filename, relative_path_basedir);
-  }
-  assert(cano_filename);
+  char* cano_filename = canonicalize_path(filename, relative_path_basedir);
   int cano_filename_len = strlen(cano_filename);
 
+  char* fake_cano_dir = canonicalize_abspath(target_dir);
   // very subtle --- if fake_cano_dir isn't simply '/' (root directory),
   // tack on a '/' to the end of fake_cano_dir, so that we
   // don't get misled by substring comparisons.  canonicalize_abspath
