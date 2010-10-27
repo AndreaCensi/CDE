@@ -17,6 +17,11 @@ static char* redirect_filename(char* filename);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 static void create_symlink_in_cde_root(char* filename, char is_regular_file);
 
+// TODO: be really careful about this, since PWD is an environment
+// variable set at the beginning of execution (it does NOT change), but
+// the getcwd() system call always reflects the latest state, taking
+// into account changes due to chdir()
+//
 // the pwd at the START of execution
 // (the target program might alter it later with a chdir syscall!)
 char starting_pwd[PATH_MAX];
