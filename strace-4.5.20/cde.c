@@ -515,6 +515,10 @@ static char* redirect_filename(char* filename) {
   else {
     // relative path ... if it doesn't start with "../", assume that
     // it's within pwd so NO redirection is needed
+    //
+    // TODO: obviously a pathological case could mis-lead this check,
+    // e.g., "hello/../../world.txt" actually resolves to "../world.txt"
+    // but our simple check won't detect it
     int len = strlen(filename);
     if ((len < 3) || (strncmp(filename, "../", 3) != 0)) {
       return NULL;
