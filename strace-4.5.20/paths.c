@@ -279,6 +279,10 @@ void mkdir_recursive(char* fullpath, int pop_one) {
 // (for relative paths, calculate their locations relative to
 //  relative_path_basedir)
 //
+// however, note that if any parent directory specified in filename is a
+// symlink, it WILL follow the symlink.  it just doesn't follow symlinks
+// specified by the (basename of) file
+//
 // mallocs a new string
 char* realpath_nofollow(char* filename, char* relative_path_basedir) {
   assert(!CDE_exec_mode);
