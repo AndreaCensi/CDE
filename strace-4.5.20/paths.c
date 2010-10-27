@@ -13,6 +13,11 @@ __asm__(".symver realpath,realpath@GLIBC_2.0");
 #include <stdarg.h>
 extern char* format(const char *format, ...);
 
+
+// note that realpath_strdup and realpath_nofollow seem to do funny
+// things to arguments that are directories (okay for regular files,
+// though)
+
 // calls realpath and mallocs a new result string
 // Pre-req: filename must actually exist on the filesystem!
 //
