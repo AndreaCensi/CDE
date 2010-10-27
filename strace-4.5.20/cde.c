@@ -155,55 +155,10 @@ static void copy_file_into_cde_root(char* filename) {
     return;
   }
 
-
-  // this is an ugly hack, but we need to figure out whether ANY
-  // parent directory of filename is itself a symlink, and handle the
-  // symlink properly
-  //
-  // e.g., look at this predicament:
-  //   $ ls -l /usr/lib/gcc/i486-linux-gnu/
-  //   total 4.0K
-  //   drwxr-xr-x 4 root root 4.0K 2010-10-26 16:21 4.4/
-  //   lrwxrwxrwx 1 root root    3 2010-10-22 01:24 4.4.0 -> 4.4/
-  //   lrwxrwxrwx 1 root root    3 2010-10-22 01:24 4.4.1 -> 4.4/
-  //
-  // 4.4.0 and 4.4.1 are both symlinks to the 4.4/ directory, but
-  // when we later use realpath to resolve filename, all mention of
-  // 4.4.0 or 4.4.1 will be gone :(
-
-  // for now, just handle absolute paths
-  if (IS_ABSPATH(filename)) {
-    struct path* p = new_path_from_abspath(filename);
-
-    int i;
-    // go up to depth - 1 to ignore last component
-    for (i = 1; i <= p->depth - 1; i++) {
-      char* dn = path2str(p, i);
-
-      char* dn_within_cde_root = prepend_cderoot(dn);
-
-      // this will NOT follow the symlink ...
-      struct stat dir_stat;
-      EXITIF(lstat(dn, &dir_stat));
-
-      if (S_ISLNK(dir_stat.st_mode)) {
-        create_symlink_in_cde_root(dn, 0);
-      }
-
-      free(dn_within_cde_root);
-      free(dn);
-    }
-    delete_path(p);
-  }
-
-
   // resolve absolute path relative to child_current_pwd and
   // get rid of '..', '.', and other weird symbols
   char* filename_abspath = canonicalize_path(filename, child_current_pwd);
   char* dst_path = prepend_cderoot(filename_abspath);
-
-  //printf("copy_file_into_cde_root %s %s\n", filename, dst_path);
-
 
   // this will NOT follow the symlink ...
   struct stat filename_stat;
