@@ -280,6 +280,7 @@ static void copy_file_into_cde_root(char* filename) {
       symlink(orig_symlink_target, symlink_loc_in_package);
     }
     assert(symlink_target_abspath);
+    assert(IS_ABSPATH(symlink_target_abspath));
     free(dir_realpath);
 
     // ok, let's get the absolute path without any '..' or '.' funniness
@@ -296,11 +297,21 @@ static void copy_file_into_cde_root(char* filename) {
       // symlink_dst_abspath if they don't yet exist
       mkdir_recursive(symlink_dst_abspath, 1);
 
+      // do a realpath_strdup to grab the ACTUAL file that
+      // symlink_target_abspath refers to, following any other symlinks
+      // present.  this means that there will be at most ONE layer of
+      // symlinks within cde-root/; all subsequent symlink layers are
+      // 'compressed' by this call ... it doesn't perfectly mimic the
+      // original filesystem, but it should work well in practice
+      char* src_file = realpath_strdup(symlink_target_abspath);
+
       //printf("  cp %s %s\n", symlink_target_abspath, symlink_dst_abspath);
       // copy the target file over to cde-root/
-      if ((link(symlink_target_abspath, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
-        copy_file(symlink_target_abspath, symlink_dst_abspath);
+      if ((link(src_file, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
+        copy_file(src_file, symlink_dst_abspath);
       }
+
+      free(src_file);
 
       // if it's a shared library, then heuristically try to grep
       // through it to find whether it might dynamically load any other
