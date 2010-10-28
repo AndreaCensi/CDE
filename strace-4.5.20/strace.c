@@ -852,11 +852,15 @@ main(int argc, char *argv[])
 
 	static char buf[BUFSIZ];
 
-  // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
-	progname = argv[0] ? argv[0] : "cde";
+  if (!argv[0]) {
+    fprintf(stderr, "cde error, wha???\n");
+    exit(1);
+  }
+	progname = argv[0];
 
   getcwd(cde_starting_pwd, sizeof cde_starting_pwd);
 
+  // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
   if (strcmp(basename(progname), "cde-exec") == 0) {
     // sanity check
     struct stat st;
@@ -875,14 +879,18 @@ main(int argc, char *argv[])
 
     // pgbovine - copy 'cde' executable to pwd and rename it 'cde-exec',
     // so that it can be included in the executable
-    if (argv[0]) {
-      // TODO: make these into lazy copies:
+    // TODO: make these into lazy copies:
+    copy_file(argv[0], "cde-exec");
 
-      copy_file(argv[0], "cde-exec");
+    mkdir(CDE_ROOT, 0777);
+    // also copy over dynamic linker to pwd to include it in package
+    copy_file("/lib/ld-linux.so.2", CDE_ROOT "/ld-linux.so.2");
 
-      mkdir(CDE_ROOT, 0777);
-      // also copy over dynamic linker to pwd to include it in package
-      copy_file("/lib/ld-linux.so.2", CDE_ROOT "/ld-linux.so.2");
+    // save cde_starting_pwd into a file as well
+    FILE* f = fopen(CDE_ROOT "/cde_starting_pwd.txt", "w");
+    if (f) {
+      fprintf(f, "%s", cde_starting_pwd);
+      fclose(f);
     }
 
     // pgbovine - append the command line to cde.log in pwd, so that the
