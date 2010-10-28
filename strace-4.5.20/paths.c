@@ -347,20 +347,8 @@ char* realpath_nofollow_DEPRECATED(char* filename, char* relative_path_basedir) 
 
 
 // return 1 iff the absolute path of filename is within target_dir
-// (for relative paths, calculate their locations relative to
-//  relative_path_basedir)
-//
-// WARNING: this does WEIRD things if filename isn't a file but rather
-// it's a directory.  e.g., "/home/pgbovine" is NOT within "/home/pgbovine"
-// since, technically a file named 'pgbovine' is NOT within "/home/pgbovine"
-//
-// in short, ONLY PASS IN FILES as filename, NOT directories
-//
-// Pre-req: filename must actually exist on the filesystem!
+// (for relative paths, calculate their locations relative to relative_path_basedir)
 int file_is_within_dir(char* filename, char* target_dir, char* relative_path_basedir) {
-  char* cano_filename = canonicalize_path(filename, relative_path_basedir);
-  int cano_filename_len = strlen(cano_filename);
-
   char* fake_cano_dir = canonicalize_abspath(target_dir);
   // very subtle --- if fake_cano_dir isn't simply '/' (root directory),
   // tack on a '/' to the end of fake_cano_dir, so that we
@@ -384,8 +372,34 @@ int file_is_within_dir(char* filename, char* target_dir, char* relative_path_bas
     cano_dir = strdup(fake_cano_dir);
   }
   assert(cano_dir);
-
   int cano_dir_len = strlen(cano_dir);
+
+  // do a similar hack by tacking on a '/' to the end of filename so
+  // that we can find exact directory matches like:
+  // "/home/pgbovine/hello" should be contained within itself ... we're
+  // then comparing:
+  // "/home/pgbovine/hello/" == "/home/pgbovine/hello/"
+  //
+  // but notice that /home/pgbovine/hello.txt is NOT within
+  // /home/pgbovine/hello/ ...
+  // "/home/pgbovine/hello.txt/" != "/home/pgbovine/hello/"
+  //
+  char* fake_cano_filename = canonicalize_path(filename, relative_path_basedir);
+  int fake_cano_filename_len = strlen(fake_cano_filename);
+
+  char* cano_filename = NULL;
+  if (fake_cano_filename_len > 1) {
+    cano_filename = (char*)malloc(fake_cano_filename_len + 2);
+    strcpy(cano_filename, fake_cano_filename);
+    cano_filename[fake_cano_filename_len] = '/';
+    cano_filename[fake_cano_filename_len + 1] = '\0';
+  }
+  else {
+    cano_filename = strdup(fake_cano_filename);
+  }
+  assert(cano_filename);
+  int cano_filename_len = strlen(cano_filename);
+
 
   // now that they are canonicalized, we can do a simple substring comparison:
   char is_within_pwd = 0;
@@ -396,6 +410,7 @@ int file_is_within_dir(char* filename, char* target_dir, char* relative_path_bas
 
   free(fake_cano_dir);
   free(cano_dir);
+  free(fake_cano_filename);
   free(cano_filename);
 
   return is_within_pwd;

@@ -68,6 +68,12 @@ int main(int argc, char** argv) {
   assert(!file_is_within_dir("/home/pgbovine/hello.txt", "/home/pgbovine/hello", NULL));
   assert(!file_is_within_dir("CDE//hello.txt", "/home/pgbovine/CDE/hello", "/home/pgbovine/"));
 
+  assert(file_is_within_dir("/home/pgbovine/hello", "/home/pgbovine/hello", NULL));
+  assert(file_is_within_dir("/home/pgbovine/hello", "/home/pgbovine/", NULL));
+  assert(file_is_within_dir("/", "//", NULL));
+  assert(file_is_within_dir("///in.txt", "//", NULL));
+  assert(file_is_within_dir("b", "/a/b", "/a"));
+
   return 0;
 }
 

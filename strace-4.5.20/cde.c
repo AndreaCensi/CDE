@@ -173,6 +173,8 @@ static void copy_file_into_cde_root(char* filename) {
   // by now, filename_stat contains the info for the actual target file,
   // NOT a symlink to it
 
+  // For relative paths containing "../" (a proxy for trying to
+  // 'reach' outside of pwd, [TODO: think about when this fails]) ...
   // Record an entry in cde-root/cde.relpaths to map the directory
   // names of relative path to the appropriate location within cde-root/.
   //
@@ -180,7 +182,7 @@ static void copy_file_into_cde_root(char* filename) {
   // machine, relative paths will be resolved differently, so we need
   // to consult cde.relpaths to find out where files are located in
   // the package.
-  if (!IS_ABSPATH(filename)) {
+  if (!IS_ABSPATH(filename) && strstr(filename, "../")) {
     char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
     char* rel_dir = dirname(rel_filename_copy);
 
@@ -373,6 +375,11 @@ done:
       struct stat st;
       if (stat(lib_fullpath, &st) == 0) {
         //printf("%s %s\n", filename, lib_fullpath);
+
+        // this COULD recursively call
+        // find_and_copy_possible_dynload_libs(), but it won't infinite
+        // loop if we activate the optimization where we punt if the
+        // file already exists and hasn't been updated:
         copy_file_into_cde_root(lib_fullpath);
       }
       free(lib_fullpath);
@@ -405,8 +412,6 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
     return;
   }
 
-  //printf("  attempt to modify %s => %s\n", tcp->opened_filename, redirected_filename);
-
   if (!tcp->childshm) {
     begin_setup_shmat(tcp);
 
@@ -417,6 +422,8 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
 
     return; // MUST punt early here!!!
   }
+
+  //printf("  attempt to modify %s => %s\n", tcp->opened_filename, redirected_filename);
 
   // redirect all requests for absolute paths to version within cde-root/
   // if those files exist!
@@ -505,31 +512,29 @@ static char* redirect_filename(char* filename) {
     return NULL;
   }
 
-  // TODO: redirect to use file_is_within_starting_pwd() instead ...
-  if (IS_ABSPATH(filename)) {
-    // easy case: absolute path, just do a plain redirect :)
-    return prepend_cderoot(filename);
+  // if it's within pwd, then do NOT redirect it
+  if (file_is_within_starting_pwd(filename)) {
+    return NULL;
+  }
 
-    // TODO: we currently don't properly handle ABSOLUTE paths that are
-    // actually within pwd ... those should NOT be redirected
+  char* relpath_within_cde_root = NULL;
+  if (IS_ABSPATH(filename)) {
+    char* filename_abspath = canonicalize_path(filename, child_current_pwd);
+    relpath_within_cde_root = prepend_cderoot(filename_abspath);
+    free(filename_abspath);
   }
   else {
-    // relative path ... if it doesn't start with "../", assume that
-    // it's within pwd so NO redirection is needed
-    //
-    // TODO: obviously a pathological case could mis-lead this check,
-    // e.g., "hello/../../world.txt" actually resolves to "../world.txt"
-    // but our simple check won't detect it
-    int len = strlen(filename);
-    if ((len < 3) || (strncmp(filename, "../", 3) != 0)) {
+    // if it's a relative path that doesn't contain "../", assume
+    // we're not trying to grab outside of pwd
+    // TODO: this isn't entirely safe, but it will do for now
+    if (!strstr(filename, "../")) {
       return NULL;
     }
 
-    // hard case: relative path OUTSIDE of pwd ...
+    // if it's a relative path that's outside of pwd,
     // consult relpath_map to do redirection
     char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
     char* rel_dir = dirname(rel_filename_copy);
-
     char* bn = basename(filename); // doesn't destroy its arg
 
     int i;
@@ -546,15 +551,21 @@ static char* redirect_filename(char* filename) {
     // if we can't find the path in relpath_map, then we're screwed!!!
     assert(found && dst_dir);
 
-    char* dst_path = format("%s/%s", dst_dir, bn);
-
+    relpath_within_cde_root = format("%s/%s", dst_dir, bn);
     free(rel_filename_copy);
-    return dst_path;
   }
+  assert(relpath_within_cde_root);
 
-  assert(0); // shouldn't reach here
-  return NULL;
+  // really really tricky ;)  if the child process has changed
+  // directories, then we can't rely on relpath_within_cde_root to
+  // exist.  instead, we must create an ABSOLUTE path based on
+  // starting_pwd, which is the directory where cde-exec was first launched!
+  char* ret = canonicalize_relpath(relpath_within_cde_root, starting_pwd);
+  free(relpath_within_cde_root);
+  //printf("redirect_filename %s => %s\n", filename, ret);
+  return ret;
 }
+
 
 /* standard functionality for syscalls that take a filename as first argument
 
@@ -1091,6 +1102,7 @@ void CDE_end_chdir(struct tcb* tcp) {
     // TODO: is this the right thing to do here???
     char* tmp = canonicalize_path(tcp->opened_filename, child_current_pwd);
     strcpy(child_current_pwd, tmp);
+    //printf("CDE_end_chdir %s %s\n", tcp->opened_filename, tmp);
     free(tmp);
 
     if (!CDE_exec_mode) {
@@ -1377,7 +1389,7 @@ void CDE_end_getcwd(struct tcb* tcp) {
   if (!syserror(tcp)) {
     char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
     strcpy(child_current_pwd, tmp);
-    //printf("CDE_end_getcwd %s\n", tmp);
+    //printf("CDE_end_getcwd %s\n", child_current_pwd);
     free(tmp);
   }
 }
