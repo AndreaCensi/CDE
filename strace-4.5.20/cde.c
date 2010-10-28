@@ -1105,6 +1105,12 @@ void CDE_end_chdir(struct tcb* tcp) {
     //printf("CDE_end_chdir %s %s\n", tcp->opened_filename, tmp);
     free(tmp);
 
+    tmp = canonicalize_path(tcp->opened_filename, tcp->current_dir);
+    strcpy(tcp->current_dir, tmp);
+    free(tmp);
+
+    // TODO: handle orig_run_current_dir
+
     if (!CDE_exec_mode) {
       char* redirected_path = redirect_filename(tcp->opened_filename);
       if (redirected_path) {
@@ -1247,6 +1253,9 @@ void alloc_tcb_CDE_fields(struct tcb* tcp) {
 
     assert(tcp->localshm);
   }
+
+  tcp->current_dir = NULL;
+  tcp->orig_run_current_dir = NULL;
 }
 
 void free_tcb_CDE_fields(struct tcb* tcp) {
@@ -1564,5 +1573,37 @@ static void create_symlink_in_cde_root(char* filename, char is_regular_file) {
   free(filename_copy);
   free(orig_symlink_target);
   free(filename_abspath);
+}
+
+void CDE_init_tcb_dir_fields(struct tcb* tcp) {
+  assert(!tcp->current_dir);
+  tcp->current_dir = malloc(MAXPATHLEN); // big boy!
+
+  if (CDE_exec_mode) {
+    assert(!tcp->orig_run_current_dir);
+    tcp->orig_run_current_dir = malloc(MAXPATHLEN); // big boy!
+  }
+
+
+  // if parent exists, then its fields MUST be legit, so grab them
+  if (tcp->parent) {
+    assert(tcp->parent->current_dir);
+    strcpy(tcp->current_dir, tcp->parent->current_dir);
+    //printf("inherited %s [%d]\n", tcp->current_dir, tcp->pid);
+
+    if (CDE_exec_mode) {
+      assert(tcp->parent->orig_run_current_dir);
+      strcpy(tcp->orig_run_current_dir, tcp->parent->orig_run_current_dir);
+    }
+  }
+  else {
+    // otherwise create fresh fields derived from master (cde) process
+    getcwd(tcp->current_dir, MAXPATHLEN);
+    //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
+
+    if (CDE_exec_mode) {
+      // TODO: initialize orig_run_current_dir from saved file
+    }
+  }
 }
 

@@ -357,6 +357,14 @@ struct tcb {
   // handle memory management in alloc_tcb_CDE_fields() and free_tcb_CDE_fields()
   char* opened_filename; // non-null during a call when a file has been opened
 
+  // both fields inherited from parent during fork()
+  // TODO: careful with memory leaks for these strdup'ed strings!
+  // if non-null, just malloc a block of size MAXPATHLEN and strcpy into it
+  char* current_dir; // REAL current directory on THIS run
+  char* orig_run_current_dir; // spoofed current directory from the ORIGINAL run,
+                              // which does NOT have to match current_dir
+                              // (only non-null when CDE_exec_mode is 1)
+
   // Fields pertaining to the shared memory segment,
   // which is only valid when CDE_exec_mode option is 1
   int shmid;

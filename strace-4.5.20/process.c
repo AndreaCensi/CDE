@@ -253,6 +253,8 @@ static const struct xlat prctl_options[] = {
 extern void CDE_begin_execve(struct tcb* tcp);
 extern void CDE_end_execve(struct tcb* tcp);
 
+extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
+
 //extern void CDE_end_uname(struct tcb* tcp);
 
 
@@ -533,6 +535,7 @@ struct tcb *tcp;
 		if (syserror(tcp))
 			return 0;
 		tcpchild = alloctcb(tcp->u_rval);
+    CDE_init_tcb_dir_fields(tcpchild); // pgbovine
 		if (proc_open(tcpchild, 2) < 0)
 			droptcb(tcpchild);
 	}
@@ -864,6 +867,7 @@ internal_fork(struct tcb *tcp)
 				sizeof tcpchild->inst);
 		}
 		tcpchild->parent = tcp;
+    CDE_init_tcb_dir_fields(tcpchild); // pgbovine - do it AFTER you init parent
 		tcp->nchildren++;
 		if (tcpchild->flags & TCB_SUSPENDED) {
 			/* The child was born suspended, due to our having
@@ -907,6 +911,7 @@ Process %u resumed (parent %d ready)\n",
 				--tcp->nchildren;
 				tcp = tcp->parent;
 				tcpchild->parent = tcp;
+        CDE_init_tcb_dir_fields(tcpchild); // pgbovine - do it AFTER you init parent
 				++tcp->nchildren;
 			}
 			if (call_flags & CLONE_THREAD) {
@@ -1001,6 +1006,7 @@ struct tcb *tcp;
 				sizeof tcpchild->inst);
 		}
 		tcpchild->parent = tcp;
+    CDE_init_tcb_dir_fields(tcpchild); // pgbovine - do it AFTER you init parent
 		tcp->nchildren++;
 		if (!qflag)
 			fprintf(stderr, "Process %d attached\n", pid);

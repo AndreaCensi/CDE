@@ -96,6 +96,7 @@ extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
 extern void strcpy_redirected_cderoot(char* dst, char* src);
 extern void CDE_create_path_symlink_dirs(void);
+extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern char starting_pwd[MAXPATHLEN + 1];
 extern char child_current_pwd[MAXPATHLEN + 1];
 
@@ -470,6 +471,7 @@ startup_attach(void)
 						tcbtab[tcbi]->nclone_threads++;
 						tcbtab[tcbi]->nclone_detached++;
 						tcp->parent = tcbtab[tcbi];
+            CDE_init_tcb_dir_fields(tcp); // pgbovine - do it AFTER you init parent
 					}
 					if (interactive) {
 						sigprocmask(SIG_SETMASK, &empty_set, NULL);
@@ -826,6 +828,8 @@ startup_child (char **argv)
 
 	/* We are the tracer.  */
 	tcp = alloctcb(daemonized_tracer ? getppid() : pid);
+  CDE_init_tcb_dir_fields(tcp); // pgbovine
+
 	if (daemonized_tracer) {
 		/* We want subsequent startup_attach() to attach to it.  */
 		tcp->flags |= TCB_ATTACHED;
@@ -1019,6 +1023,7 @@ main(int argc, char *argv[])
 				break;
 			}
 			tcp = alloc_tcb(pid, 0);
+      CDE_init_tcb_dir_fields(tcp); // pgbovine
 			tcp->flags |= TCB_ATTACHED;
 			pflag_seen++;
 			break;
@@ -2569,6 +2574,7 @@ trace()
 				   child so that we know how to do clearbpt
 				   in the child.  */
 				tcp = alloctcb(pid);
+        // hmmm no longer seem to need it here - CDE_init_tcb_dir_fields(tcp); // pgbovine
 				tcp->flags |= TCB_ATTACHED | TCB_SUSPENDED;
 				if (!qflag)
 					fprintf(stderr, "\
