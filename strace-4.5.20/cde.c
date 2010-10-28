@@ -18,51 +18,15 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
                                        char is_regular_file);
 
-// the pwd of the cde executable AT THE START of execution
+// the true pwd of the cde executable AT THE START of execution
 char cde_starting_pwd[MAXPATHLEN];
+// if CDE_exec_mode is on, then this is the pwd of the cde exectuable at
+// the start of the ORIGINAL execution (could differ from cde_starting_pwd)
+char orig_run_cde_starting_pwd[MAXPATHLEN];
 
 // to shut up gcc warnings without going thru #include hell
 extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
-
-// maps relative paths to their locations within cde-root/
-// (serialized as cde-root/cde.relpaths file)
-static struct {
-  char* src;
-  char* tgt;
-} relpath_map[50];
-static int relpath_map_size = 0;
-
-
-void CDE_init_relpaths(void) {
-  FILE* relpath_f = fopen(CDE_ROOT "/cde.relpaths", "r");
-  if (!relpath_f) {
-    return;
-  }
-
-  size_t len = 0;
-  ssize_t read;
-  char* tmp = NULL; // getline() mallocs for us
-  while ((read = getline(&tmp, &len, relpath_f)) != -1) {
-    // gross string manipulation in C, ugh :(
-
-    // strip off trailing newline
-    assert(tmp[read-1] == '\n');
-    tmp[read-1] = '\0';
-    char* colon = strchr(tmp, ':');
-    assert(colon);
-    char* tgt = colon + 1;
-    *colon = '\0';
-    char* src = tmp;
-
-    relpath_map[relpath_map_size].src = strdup(src);
-    relpath_map[relpath_map_size].tgt = strdup(tgt);
-    relpath_map_size++;
-    assert(relpath_map_size < 50); // bound it for simplicity
-  }
-  free(tmp);
-  fclose(relpath_f);
-}
 
 // prepend "cde-root" to the given path string, assumes that the string
 // starts with '/' (i.e., it's an absolute path)
@@ -97,8 +61,14 @@ static int ignore_path(char* filename) {
   return 0;
 }
 
-static int file_is_within_starting_pwd(char* filename, char* child_current_pwd) {
-  return file_is_within_dir(filename, cde_starting_pwd, child_current_pwd);
+// is the file within the ORIGINAL run's starting directory
+static int file_is_within_original_starting_pwd(char* filename, char* child_current_pwd) {
+  if (CDE_exec_mode) {
+    return file_is_within_dir(filename, orig_run_cde_starting_pwd, child_current_pwd);
+  }
+  else {
+    return file_is_within_dir(filename, cde_starting_pwd, child_current_pwd);
+  }
 }
 
 
@@ -139,9 +109,7 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
   }
 
   // don't do anything for files inside of pwd :)
-  //
-  // TODO: this doesn't do the right thing if filename refers to a DIRECTORY 
-  if (file_is_within_starting_pwd(filename, child_current_pwd)) {
+  if (file_is_within_original_starting_pwd(filename, child_current_pwd)) {
     return;
   }
 
@@ -162,52 +130,6 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
 
   // by now, filename_stat contains the info for the actual target file,
   // NOT a symlink to it
-
-  // For relative paths containing "../" (a proxy for trying to
-  // 'reach' outside of pwd, [TODO: think about when this fails]) ...
-  // Record an entry in cde-root/cde.relpaths to map the directory
-  // names of relative path to the appropriate location within cde-root/.
-  //
-  // We need to do this because when we move the package to another
-  // machine, relative paths will be resolved differently, so we need
-  // to consult cde.relpaths to find out where files are located in
-  // the package.
-  if (!IS_ABSPATH(filename) && strstr(filename, "../")) {
-    char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
-    char* rel_dir = dirname(rel_filename_copy);
-
-    char* dst_path_copy = strdup(dst_path); // dirname() destroys its arg
-    char* dir_within_package = dirname(dst_path_copy);
-
-    // don't insert duplicates
-    int i;
-    int found = 0;
-    for (i = 0; i < relpath_map_size; i++) {
-      if (strcmp(relpath_map[i].src, rel_dir) == 0) {
-        assert(strcmp(relpath_map[i].tgt, dir_within_package) == 0);
-        found = 1;
-        break;
-      }
-    }
-
-    if (!found) {
-      relpath_map[relpath_map_size].src = strdup(rel_dir);
-      relpath_map[relpath_map_size].tgt = strdup(dir_within_package);
-      relpath_map_size++;
-      assert(relpath_map_size < 50); // bound it for simplicity
-
-      FILE* relpath_f = fopen(CDE_ROOT "/cde.relpaths", "a");
-      assert(relpath_f);
-
-      // colon-delimited to support paths with spaces in them
-      fprintf(relpath_f, "%s:%s\n", rel_dir, dir_within_package);
-      fclose(relpath_f);
-    }
-
-    free(dst_path_copy);
-    free(rel_filename_copy);
-  }
-
 
   if (S_ISREG(filename_stat.st_mode)) { // regular file or symlink to regular file
     // lazy optimization to avoid redundant copies ...
@@ -511,48 +433,13 @@ static char* redirect_filename(char* filename, char* child_current_pwd) {
   }
 
   // if it's within pwd, then do NOT redirect it
-  if (file_is_within_starting_pwd(filename, child_current_pwd)) {
+  if (file_is_within_original_starting_pwd(filename, child_current_pwd)) {
     return NULL;
   }
 
-  char* relpath_within_cde_root = NULL;
-  if (IS_ABSPATH(filename)) {
-    char* filename_abspath = canonicalize_path(filename, child_current_pwd);
-    relpath_within_cde_root = prepend_cderoot(filename_abspath);
-    free(filename_abspath);
-  }
-  else {
-    // if it's a relative path that doesn't contain "../", assume
-    // we're not trying to grab outside of pwd
-    // TODO: this isn't entirely safe, but it will do for now
-    if (!strstr(filename, "../")) {
-      return NULL;
-    }
-
-    // if it's a relative path that's outside of pwd,
-    // consult relpath_map to do redirection
-    char* rel_filename_copy = strdup(filename); // dirname() destroys its arg
-    char* rel_dir = dirname(rel_filename_copy);
-    char* bn = basename(filename); // doesn't destroy its arg
-
-    int i;
-    int found = 0;
-    char* dst_dir = NULL;
-    for (i = 0; i < relpath_map_size; i++) {
-      if (strcmp(relpath_map[i].src, rel_dir) == 0) {
-        dst_dir = relpath_map[i].tgt;
-        found = 1;
-        break;
-      }
-    }
-
-    // if we can't find the path in relpath_map, then we're screwed!!!
-    assert(found && dst_dir);
-
-    relpath_within_cde_root = format("%s/%s", dst_dir, bn);
-    free(rel_filename_copy);
-  }
-  assert(relpath_within_cde_root);
+  char* filename_abspath = canonicalize_path(filename, child_current_pwd);
+  char* relpath_within_cde_root = prepend_cderoot(filename_abspath);
+  free(filename_abspath);
 
   // really really tricky ;)  if the child process has changed
   // directories, then we can't rely on relpath_within_cde_root to
@@ -560,7 +447,7 @@ static char* redirect_filename(char* filename, char* child_current_pwd) {
   // cde_starting_pwd, which is the directory where cde-exec was first launched!
   char* ret = canonicalize_relpath(relpath_within_cde_root, cde_starting_pwd);
   free(relpath_within_cde_root);
-  //printf("redirect_filename %s => %s\n", filename, ret);
+  //printf("redirect_filename %s [%s] => %s\n", filename, child_current_pwd, ret);
   return ret;
 }
 
@@ -1265,6 +1152,16 @@ void free_tcb_CDE_fields(struct tcb* tcp) {
   tcp->localshm = NULL;
   tcp->childshm = NULL;
   tcp->setting_up_shm = 0;
+
+  if (tcp->current_dir) {
+    free(tcp->current_dir);
+    tcp->current_dir = NULL;
+  }
+  if (tcp->orig_run_current_dir) {
+    free(tcp->orig_run_current_dir);
+    tcp->orig_run_current_dir = NULL;
+  }
+
 }
 
 
@@ -1627,17 +1524,8 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
     //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
 
     if (CDE_exec_mode) {
-      // initialize orig_run_current_dir from cde-root/cde_starting_pwd.txt
-      FILE* f = fopen(CDE_ROOT "/cde_starting_pwd.txt", "r");
-      assert(f);
-      char* line = NULL;
-      size_t len = 0;
-      ssize_t read;
-      read = getline(&line, &len, f);
-
-      strcpy(tcp->orig_run_current_dir, line);
-
-      fclose(f);
+      // this might not be perfect, but it's the best we can do for now ...
+      strcpy(tcp->orig_run_current_dir, orig_run_cde_starting_pwd);
       //printf("  > fresh %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
     }
   }

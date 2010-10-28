@@ -90,7 +90,6 @@ extern char *optarg;
 
 // pgbovine
 extern char CDE_exec_mode;
-extern void CDE_init_relpaths(void);
 extern void alloc_tcb_CDE_fields(struct tcb* tcp);
 extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
@@ -98,6 +97,7 @@ extern void strcpy_redirected_cderoot(char* dst, char* src);
 extern void CDE_create_path_symlink_dirs(void);
 extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern char cde_starting_pwd[MAXPATHLEN];
+extern char orig_run_cde_starting_pwd[MAXPATHLEN];
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -862,17 +862,29 @@ main(int argc, char *argv[])
 
   // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
   if (strcmp(basename(progname), "cde-exec") == 0) {
+    CDE_exec_mode = 1;
+
     // sanity check
     struct stat st;
     if (stat(CDE_ROOT, &st) != 0 || !S_ISDIR(st.st_mode)) {
-      fprintf(stderr, "cde-exec error: cde-root/ sub-directory does not exist\n");
+      fprintf(stderr, "cde-exec error: " CDE_ROOT "/ sub-directory does not exist\n");
       exit(1);
     }
 
-    CDE_exec_mode = 1;
+    // initialize orig_run_cde_starting_pwd from cde-root/cde_starting_pwd.txt
+    FILE* f = fopen(CDE_ROOT "/cde_starting_pwd.txt", "r");
+    if (!f) {
+      fprintf(stderr, "cde-exec error: " CDE_ROOT "/cde_starting_pwd.txt does not exist\n");
+      exit(1);
+    }
+    char* line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    read = getline(&line, &len, f);
 
-    // process cde-root/cde.relpaths if it exists
-    CDE_init_relpaths();
+    strcpy(orig_run_cde_starting_pwd, line);
+
+    fclose(f);
   }
   else {
     CDE_exec_mode = 0;
@@ -906,9 +918,6 @@ main(int argc, char *argv[])
       fprintf(log, "\n");
       fclose(log);
     }
-
-    // start over with cde.relpaths so that we don't multiple-append
-    unlink(CDE_ROOT "/cde.relpaths");
   }
 
   // pgbovine - allow most slutty of permissions for new files/directories
