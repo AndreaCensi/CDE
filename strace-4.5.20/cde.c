@@ -1400,21 +1400,26 @@ void CDE_end_getcwd(struct tcb* tcp) {
       // the program to try again
       // http://linux.die.net/man/2/getcwd
 
+      // interesting: this might give weird results for the coreutils
+      // 'pwd' program since pwd doesn't actually call getcwd() ... it
+      // does its own funky-ass thing!
+
       assert(tcp->orig_run_current_dir);
       // spoof it!
       memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0],
                       (char*)tcp->orig_run_current_dir,
                       strlen(tcp->orig_run_current_dir) + 1);
 
-      char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
-      printf("[%d] CDE_end_getcwd spoofed: %s\n", tcp->pid, tmp);
-      free(tmp);
+      // for debugging
+      //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
+      //printf("[%d] CDE_end_getcwd spoofed: %s\n", tcp->pid, tmp);
+      //free(tmp);
     }
     else {
       char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
       strcpy(tcp->current_dir, tmp);
       free(tmp);
-      printf("[%d] CDE_end_getcwd: %s\n", tcp->pid, tcp->current_dir);
+      //printf("[%d] CDE_end_getcwd: %s\n", tcp->pid, tcp->current_dir);
     }
   }
 }
@@ -1608,18 +1613,18 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
   if (tcp->parent) {
     assert(tcp->parent->current_dir);
     strcpy(tcp->current_dir, tcp->parent->current_dir);
-    printf("inherited %s [%d]\n", tcp->current_dir, tcp->pid);
+    //printf("inherited %s [%d]\n", tcp->current_dir, tcp->pid);
 
     if (CDE_exec_mode) {
       assert(tcp->parent->orig_run_current_dir);
       strcpy(tcp->orig_run_current_dir, tcp->parent->orig_run_current_dir);
-      printf("  > inherited %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
+      //printf("  > inherited %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
     }
   }
   else {
     // otherwise create fresh fields derived from master (cde) process
     getcwd(tcp->current_dir, MAXPATHLEN);
-    printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
+    //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
 
     if (CDE_exec_mode) {
       // initialize orig_run_current_dir from cde-root/cde_starting_pwd.txt
@@ -1633,7 +1638,7 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
       strcpy(tcp->orig_run_current_dir, line);
 
       fclose(f);
-      printf("  > fresh %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
+      //printf("  > fresh %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
     }
   }
 }

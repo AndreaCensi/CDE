@@ -1,13 +1,12 @@
 import os
 
-os.system('pwd')
+print os.getcwd()
 
-# change directories and then spawn a sub-process
-#os.chdir('../')
-#os.system('pwd')
+os.chdir('../')
+os.system('./hello-world-parent-dir')
 
-#os.chdir('../../')
-#os.system('pwd')
+os.chdir('../../')
+os.system('echo hello')
 
-#os.chdir('/home/pgbovine')
-#os.system('pwd')
+os.chdir('/home/pgbovine')
+os.system('echo hello')
