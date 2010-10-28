@@ -17,19 +17,8 @@ static char* redirect_filename(char* filename);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 static void create_symlink_in_cde_root(char* filename, char is_regular_file);
 
-// TODO: be really careful about this, since PWD is an environment
-// variable set at the beginning of execution (it does NOT change), but
-// the getcwd() system call always reflects the latest state, taking
-// into account changes due to chdir()
-//
-// DON'T try to spoof getcwd when running in CDE_exec_mode ... always
-// return the true cwd on the guest machine ...
-//
-// the pwd at the START of execution
-// (the target program might alter it later with a chdir syscall!)
-char starting_pwd[PATH_MAX];
-// current pwd, keeping up to date with chdir syscalls
-char child_current_pwd[PATH_MAX];
+// the pwd of the cde executable AT THE START of execution
+char cde_starting_pwd[MAXPATHLEN];
 
 // to shut up gcc warnings without going thru #include hell
 extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
@@ -108,7 +97,7 @@ static int ignore_path(char* filename) {
 }
 
 static int file_is_within_starting_pwd(char* filename) {
-  return file_is_within_dir(filename, starting_pwd, child_current_pwd);
+  return file_is_within_dir(filename, cde_starting_pwd, child_current_pwd);
 }
 
 
@@ -559,8 +548,8 @@ static char* redirect_filename(char* filename) {
   // really really tricky ;)  if the child process has changed
   // directories, then we can't rely on relpath_within_cde_root to
   // exist.  instead, we must create an ABSOLUTE path based on
-  // starting_pwd, which is the directory where cde-exec was first launched!
-  char* ret = canonicalize_relpath(relpath_within_cde_root, starting_pwd);
+  // cde_starting_pwd, which is the directory where cde-exec was first launched!
+  char* ret = canonicalize_relpath(relpath_within_cde_root, cde_starting_pwd);
   free(relpath_within_cde_root);
   //printf("redirect_filename %s => %s\n", filename, ret);
   return ret;
@@ -1589,7 +1578,7 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
   if (tcp->parent) {
     assert(tcp->parent->current_dir);
     strcpy(tcp->current_dir, tcp->parent->current_dir);
-    //printf("inherited %s [%d]\n", tcp->current_dir, tcp->pid);
+    printf("inherited %s [%d]\n", tcp->current_dir, tcp->pid);
 
     if (CDE_exec_mode) {
       assert(tcp->parent->orig_run_current_dir);
@@ -1599,7 +1588,7 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
   else {
     // otherwise create fresh fields derived from master (cde) process
     getcwd(tcp->current_dir, MAXPATHLEN);
-    //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
+    printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
 
     if (CDE_exec_mode) {
       // TODO: initialize orig_run_current_dir from saved file

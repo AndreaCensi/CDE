@@ -16,7 +16,7 @@
 
 
 // quick check for whether a path is absolute
-#define IS_ABSPATH(p) (p[0] == '/')
+#define IS_ABSPATH(p) ((p) && p[0] == '/')
 
 // to shut up gcc warnings without going thru #include hell
 extern char* basename(const char *fname);
