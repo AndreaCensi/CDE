@@ -30,12 +30,33 @@ extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
 // prepend "cde-root" to the given path string, assumes that the string
 // starts with '/' (i.e., it's an absolute path)
+//
+// warning - this returns a relative path
 // mallocs a new string!
 char* prepend_cderoot(char* path) {
   assert(IS_ABSPATH(path));
   char* ret = malloc(CDE_ROOT_LEN + strlen(path) + 1);
   strcpy(ret, CDE_ROOT);
   strcat(ret, path);
+  return ret;
+}
+
+// calls prepend_cderoot and then resolves it relative to
+// cde_starting_pwd, to create an ABSOLUTE path within cde-root/
+// mallocs a new string!
+//
+// Pre-req: path must be an absolute path!
+char* create_abspath_within_cderoot(char* path) {
+  char* relpath_within_cde_root = prepend_cderoot(path);
+
+  // really really tricky ;)  if the child process has changed
+  // directories, then we can't rely on relpath_within_cde_root to
+  // exist.  instead, we must create an ABSOLUTE path based on
+  // cde_starting_pwd, which is the directory where cde-exec was first launched!
+  char* ret = canonicalize_relpath(relpath_within_cde_root, cde_starting_pwd);
+  free(relpath_within_cde_root);
+
+  assert(IS_ABSPATH(ret));
   return ret;
 }
 
@@ -438,15 +459,14 @@ static char* redirect_filename(char* filename, char* child_current_pwd) {
   }
 
   char* filename_abspath = canonicalize_path(filename, child_current_pwd);
-  char* relpath_within_cde_root = prepend_cderoot(filename_abspath);
-  free(filename_abspath);
 
   // really really tricky ;)  if the child process has changed
   // directories, then we can't rely on relpath_within_cde_root to
   // exist.  instead, we must create an ABSOLUTE path based on
   // cde_starting_pwd, which is the directory where cde-exec was first launched!
-  char* ret = canonicalize_relpath(relpath_within_cde_root, cde_starting_pwd);
-  free(relpath_within_cde_root);
+  char* ret = create_abspath_within_cderoot(filename_abspath);
+  free(filename_abspath);
+
   //printf("redirect_filename %s [%s] => %s\n", filename, child_current_pwd, ret);
   return ret;
 }
@@ -518,6 +538,8 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
 
 
 void CDE_begin_execve(struct tcb* tcp) {
+  char* ld_linux_fullpath = NULL;
+
   assert(!tcp->opened_filename);
   tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
 
@@ -526,7 +548,7 @@ void CDE_begin_execve(struct tcb* tcp) {
   // anything and simply let the execve fail just like it's supposed to
   struct stat filename_stat;
 
-  //printf("%s CDE_begin_execve\n", tcp->opened_filename);
+  //printf("CDE_begin_execve '%s'\n", tcp->opened_filename);
 
   char* redirected_path = NULL;
   if (CDE_exec_mode) {
@@ -618,6 +640,8 @@ void CDE_begin_execve(struct tcb* tcp) {
       goto done; // MUST punt early here!!!
     }
 
+    ld_linux_fullpath = create_abspath_within_cderoot("/ld-linux.so.2");
+
     /* we're gonna do some craziness here to redirect the OS to call
        cde-root/ld-linux.so.2 rather than the real program, since
        ld-linux.so.2 is closely-tied with the version of libc in
@@ -646,8 +670,8 @@ void CDE_begin_execve(struct tcb* tcp) {
       //printf("script_command='%s', path_to_executable='%s'\n", script_command, path_to_executable);
 
       char* base = (char*)tcp->localshm;
-      strcpy(base, CDE_ROOT "/ld-linux.so.2");
-      int ld_linux_offset = strlen(CDE_ROOT "/ld-linux.so.2") + 1;
+      strcpy(base, ld_linux_fullpath);
+      int ld_linux_offset = strlen(ld_linux_fullpath) + 1;
 
       char* cur_loc = (char*)(base + ld_linux_offset);
       char* script_command_token_starts[30]; // stores starting locations of each token
@@ -730,14 +754,14 @@ void CDE_begin_execve(struct tcb* tcp) {
         Note that we only need to do this if we're in CDE_exec_mode */
 
       char* base = (char*)tcp->localshm;
-      strcpy(base, CDE_ROOT "/ld-linux.so.2");
-      int offset = strlen(CDE_ROOT "/ld-linux.so.2") + 1;
+      strcpy(base, ld_linux_fullpath);
+      int offset = strlen(ld_linux_fullpath) + 1;
       char** new_argv = (char**)(base + offset);
 
       // really subtle, these addresses should be in the CHILD's address space,
       // not the parent's
 
-      // points to "cde-root/ld-linux.so.2"
+      // points to ld_linux_fullpath
       new_argv[0] = (char*)tcp->childshm;
       // points to original program name (full path)
       new_argv[1] = (char*)tcp->u_arg[0];
@@ -757,11 +781,13 @@ void CDE_begin_execve(struct tcb* tcp) {
         i++;
       }
 
+      /*
       i = 0;
       cur_arg = NULL;
       while (1) {
         cur_arg = new_argv[i];
         if (cur_arg) {
+          printf("new_argv[%d] = %s\n", i, strcpy_from_child(tcp, cur_arg));
           i++;
         }
         // argv is null-terminated
@@ -769,6 +795,7 @@ void CDE_begin_execve(struct tcb* tcp) {
           break;
         }
       }
+      */
 
       // now set ebx to the new program name and ecx to the new argv array
       // to alter the arguments of the execv system call :0
@@ -803,6 +830,10 @@ done:
 
   if (script_command) {
     free(script_command);
+  }
+
+  if (ld_linux_fullpath) {
+    free(ld_linux_fullpath);
   }
 }
 
