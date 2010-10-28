@@ -1264,11 +1264,12 @@ void finish_setup_shmat(struct tcb* tcp) {
 
 
 // copy src into dst, redirecting it into cde-root/ if necessary
-// (computed relative to cde_starting_pwd)
+// (computed relative to orig_run_cde_starting_pwd!!!)
 //
 // dst should be big enough to hold a full path
 void strcpy_redirected_cderoot(char* dst, char* src) {
-  char* redirected_src = redirect_filename(src, cde_starting_pwd);
+  assert(CDE_exec_mode);
+  char* redirected_src = redirect_filename(src, orig_run_cde_starting_pwd);
   if (redirected_src) {
     strcpy(dst, redirected_src);
     free(redirected_src);

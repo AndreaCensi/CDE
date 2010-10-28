@@ -22,9 +22,26 @@ def run_cde(argv, silent=False):
   return (stdout, stderr)
 
 def run_and_cmp_cde_exec(argv, prev_stdout, prev_stderr):
+  # to make for a tougher test, move the entire directory to /tmp
+  # and try to do a cde-exec run
+  full_pwd = os.getcwd()
+  cur_dirname = os.path.basename(full_pwd)
+  tmp_test_dir = "/tmp/" + cur_dirname
+
+  # careful with these commands!
+  (stdout, stderr) = Popen(["rm", "-rf", tmp_test_dir], stdout=PIPE, stderr=PIPE).communicate()
+  assert not stdout and not stderr
+  (stdout, stderr) = Popen(["cp", "-aR", full_pwd, "/tmp"], stdout=PIPE, stderr=PIPE).communicate()
+  assert not stdout and not stderr
+
+  # run the cde-exec test in tmp_test_dir
+  os.chdir(tmp_test_dir)
+
   (stdout, stderr) = Popen([CDE_EXEC] + argv, stdout=PIPE, stderr=PIPE).communicate()
   assert stdout == prev_stdout
   assert stderr == prev_stderr
+
+  os.chdir(full_pwd) # make sure to chdir back!!!
 
 
 def generic_test_runner(argv, checker_func):

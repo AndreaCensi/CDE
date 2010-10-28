@@ -705,7 +705,7 @@ startup_child (char **argv)
 	}
 
   // pgbovine - if we still haven't initialized it yet, do so now
-  if (path_to_search[0] == '\0') {
+  if (path_to_search[0] == '\0') { // uninit
     if (CDE_exec_mode) {
       strcpy_redirected_cderoot(path_to_search, pathname);
     }
