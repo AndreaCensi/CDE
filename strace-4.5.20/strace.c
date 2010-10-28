@@ -884,6 +884,7 @@ main(int argc, char *argv[])
 
     strcpy(orig_run_cde_starting_pwd, line);
 
+    free(line);
     fclose(f);
   }
   else {
