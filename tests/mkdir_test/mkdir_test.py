@@ -1,7 +1,7 @@
 import os
 
 try:
-  os.mkdir('/tmp/testdir')
+  os.mkdir('/home/pgbovine/testdir')
 except OSError:
   pass
 

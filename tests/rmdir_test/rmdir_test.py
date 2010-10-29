@@ -1,12 +1,12 @@
 import os
 
-if os.path.isdir('/tmp/guinea-pig-dir/guinea-pig-subdir'):
-  os.rmdir('/tmp/guinea-pig-dir/guinea-pig-subdir')
+if os.path.isdir('/home/pgbovine/guinea-pig-dir/guinea-pig-subdir'):
+  os.rmdir('/home/pgbovine/guinea-pig-dir/guinea-pig-subdir')
 
-if os.path.isdir('/tmp/guinea-pig-dir'):
-  os.rmdir('/tmp/guinea-pig-dir')
+if os.path.isdir('/home/pgbovine/guinea-pig-dir'):
+  os.rmdir('/home/pgbovine/guinea-pig-dir')
 
-os.mkdir('/tmp/guinea-pig-dir')
-os.mkdir('/tmp/guinea-pig-dir/guinea-pig-subdir')
-os.rmdir('/tmp/guinea-pig-dir/guinea-pig-subdir')
+os.mkdir('/home/pgbovine/guinea-pig-dir')
+os.mkdir('/home/pgbovine/guinea-pig-dir/guinea-pig-subdir')
+os.rmdir('/home/pgbovine/guinea-pig-dir/guinea-pig-subdir')
 

@@ -73,8 +73,16 @@ static int ignore_path(char* filename) {
   //
   // .Xauthority is used for X11 authentication via ssh, so we need to
   // use the REAL version and not the one in cde-root/
+  //
+  // ignore "/tmp" and "/tmp/*" since programs often put lots of
+  // session-specific stuff into /tmp so DO NOT track files within
+  // there, or else you will risk severely 'overfitting' and ruining
+  // portability across machines.  it's safe to assume that all Linux
+  // distros have a /tmp directory that anybody can write into
   if ((strncmp(filename, "/dev/", 5) == 0) ||
       (strncmp(filename, "/proc/", 6) == 0) ||
+      (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
+      (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
       (strcmp(basename(filename), ".Xauthority") == 0)) {
     return 1;
   }
