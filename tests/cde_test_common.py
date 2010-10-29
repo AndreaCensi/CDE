@@ -43,6 +43,9 @@ def run_and_cmp_cde_exec(argv, prev_stdout, prev_stderr):
 
   os.chdir(full_pwd) # make sure to chdir back!!!
 
+  # remove the version in tmp
+  (stdout, stderr) = Popen(["rm", "-rf", tmp_test_dir], stdout=PIPE, stderr=PIPE).communicate()
+
 
 def generic_test_runner(argv, checker_func):
   clear_cde_root()
