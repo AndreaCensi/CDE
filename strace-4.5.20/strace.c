@@ -852,6 +852,12 @@ main(int argc, char *argv[])
 
 	static char buf[BUFSIZ];
 
+  // make sure this constant is a reasonable number and not something KRAZY
+  if (MAXPATHLEN > (1024 * 4096)) {
+    fprintf(stderr, "cde error, MAXPATHLEN is HUGE!!!\n");
+    exit(1);
+  }
+
   if (!argv[0]) {
     fprintf(stderr, "cde error, wha???\n");
     exit(1);

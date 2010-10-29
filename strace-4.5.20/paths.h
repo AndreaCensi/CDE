@@ -10,6 +10,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 
 //#define _GNU_SOURCE // for vasprintf (now we include _GNU_SOURCE in Makefile)
 #include <stdio.h>

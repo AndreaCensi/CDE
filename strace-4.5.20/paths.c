@@ -26,7 +26,7 @@ static struct path* new_path(char is_abspath);
 char* realpath_strdup(char* filename) {
   assert(!CDE_exec_mode);
   
-  char path[PATH_MAX];
+  char path[MAXPATHLEN];
   path[0] = '\0';
   char* ret = realpath(filename, path);
   assert(ret); // the target path must actually exist!
@@ -39,7 +39,7 @@ char* realpath_strdup(char* filename) {
 char* readlink_strdup(char* filename) {
   assert(!CDE_exec_mode);
 
-  char path[PATH_MAX];
+  char path[MAXPATHLEN];
   path[0] = '\0';
   int len = readlink(filename, path, sizeof path);
   assert(path[0] != '\0');

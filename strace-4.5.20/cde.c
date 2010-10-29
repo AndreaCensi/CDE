@@ -11,7 +11,7 @@ static void find_and_copy_possible_dynload_libs(char* filename, char* child_curr
 
 static char* strcpy_from_child(struct tcb* tcp, long addr);
 
-#define SHARED_PAGE_SIZE (PATH_MAX * 2)
+#define SHARED_PAGE_SIZE (MAXPATHLEN * 4)
 
 static char* redirect_filename(char* filename, char* child_current_pwd);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
@@ -246,7 +246,7 @@ static void find_and_copy_possible_dynload_libs(char* filename, char* child_curr
   int i;
   int dlopen_found = 0; // did we find a symbol starting with 'dlopen'?
 
-  char cur_string[PATH_MAX];
+  char cur_string[MAXPATHLEN];
   cur_string[0] = '\0';
   int cur_ind = 0;
 
@@ -367,7 +367,7 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
   strcpy(tcp->localshm, redirected_filename); // hopefully this doesn't overflow :0
 
   //printf("  redirect %s\n", tcp->localshm);
-  //static char tmp[PATH_MAX];
+  //static char tmp[MAXPATHLEN];
   //EXITIF(umovestr(tcp, (long)tcp->childshm, sizeof tmp, tmp) < 0);
   //printf("     %s\n", tmp);
 
@@ -414,7 +414,7 @@ static void modify_syscall_two_args(struct tcb* tcp) {
     cur_regs.ecx = (long)(((char*)tcp->childshm) + len1 + 1);
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
-    //static char tmp[PATH_MAX];
+    //static char tmp[MAXPATHLEN];
     //EXITIF(umovestr(tcp, (long)cur_regs.ebx, sizeof tmp, tmp) < 0);
     //printf("  ebx: %s\n", tmp);
     //EXITIF(umovestr(tcp, (long)cur_regs.ecx, sizeof tmp, tmp) < 0);
@@ -1281,7 +1281,7 @@ void strcpy_redirected_cderoot(char* dst, char* src) {
 
 // malloc a new string from child
 static char* strcpy_from_child(struct tcb* tcp, long addr) {
-  char path[PATH_MAX];
+  char path[MAXPATHLEN];
   EXITIF(umovestr(tcp, addr, sizeof path, path) < 0);
   return strdup(path);
 }
@@ -1363,7 +1363,7 @@ void CDE_create_path_symlink_dirs() {
   char *p;
   int m, n;
   struct stat st;
-  char tmp_buf[PATH_MAX];
+  char tmp_buf[MAXPATHLEN];
 
   for (p = getenv("PATH"); p && *p; p += m) {
     if (strchr(p, ':')) {
@@ -1449,7 +1449,7 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
     // symlink in the CDE package a RELATIVE path starting from
     // the cde-root/ base directory
     struct path* p = new_path_from_abspath(dir_realpath);
-    char tmp[PATH_MAX];
+    char tmp[MAXPATHLEN];
     if (p->depth > 0) {
       strcpy(tmp, "..");
       int i;
