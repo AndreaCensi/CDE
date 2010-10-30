@@ -461,9 +461,53 @@ static char* redirect_filename(char* filename, char* child_current_pwd) {
     return NULL;
   }
 
-  // if it's within pwd, then do NOT redirect it
   if (file_is_within_original_starting_pwd(filename, child_current_pwd)) {
-    return NULL;
+    if (CDE_exec_mode) {
+      // tricky turkey!  child_current_pwd is actually the current dir
+      // from the ORIGINAL RUN (tcp->orig_run_current_dir), so if it's
+      // an absolute path, then turn it into a relative path by
+      // stripping off child_current_pwd from its prefix (make sure to
+      // return '.' when filename == child_current_pwd), so that it can
+      // be resolved relative to the current directory on the current
+      // machine.  e.g., for:
+      //
+      //   filename = "/home/pgbovine/test.txt"
+      //   child_current_pwd = "/home/pgbovine" (from ORIGINAL RUN)
+      //
+      // simply return "test.txt" so that no matter which machine or
+      // directory you're running in, you will access the right "test.txt"
+      if (IS_ABSPATH(filename)) {
+        struct path* file_p = new_path_from_abspath(filename);
+        struct path* base_p = new_path_from_abspath(child_current_pwd);
+
+        static char tmp_buf[MAXPATHLEN];
+        strcpy(tmp_buf, "."); // set this as the default value
+
+        assert(file_p->depth >= base_p->depth);
+        int i;
+        // sanity checks
+        for (i = 1; i <= base_p->depth; i++) {
+          assert(strcmp(get_path_component(file_p, i), get_path_component(base_p, i)) == 0);
+        }
+        for (i = base_p->depth + 1; i <= file_p->depth; i++) {
+          strcat(tmp_buf, "/");
+          strcat(tmp_buf, get_path_component(file_p, i));
+        }
+
+        delete_path(file_p);
+        delete_path(base_p);
+        return strdup(tmp_buf);
+      }
+      else {
+        return NULL;
+      }
+    }
+    else {
+      // if it's within pwd, then do NOT redirect it
+      return NULL;
+    }
+
+    assert(0); // should never reach here
   }
 
   char* filename_abspath = canonicalize_path(filename, child_current_pwd);

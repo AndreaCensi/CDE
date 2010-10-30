@@ -76,6 +76,14 @@ void path_pop(struct path* p) {
   p->depth--;
 }
 
+// paths are indexed starting at 1
+char* get_path_component(struct path* p, int ind) {
+  assert(ind <= p->depth);
+  char* ret = p->stack[ind - 1]->str;
+  assert(ret);
+  return ret;
+}
+
 static struct path* new_path_internal(char* path, char is_abspath) {
   int stackleft;
 

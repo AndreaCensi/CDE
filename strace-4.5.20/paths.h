@@ -25,7 +25,6 @@ extern char *dirname(char *path);
 
 char* format(const char *format, ...);
 
-
 char* realpath_strdup(char* filename);
 char* readlink_strdup(char* filename);
 
@@ -50,6 +49,8 @@ struct path {
   struct namecomp **stack;
 };
 
+
+char* get_path_component(struct path* p, int ind);
 
 char* canonicalize_abspath(char* abspath);
 char* canonicalize_relpath(char* relpath, char* base);
