@@ -3,6 +3,9 @@
 //
 // some of my comments are marked as 'pgbovine'
 
+__asm__(".symver __xstat64,__xstat64@GLIBC_2.1"); // hack to eliminate glibc 2.2 dependency
+
+
 /* readelf.c -- display contents of an ELF format file
    Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007,
    2008, 2009  Free Software Foundation, Inc.
@@ -159,7 +162,6 @@
 #include "getopt.h"
 #include "libiberty.h"
 //#include "safe-ctype.h" // pgbovine - this relies on libiberty, so comment it out
-#include "ctype.h"        // pgbovine - instead, just use regular ctype.h for simplicity
 #include "filenames.h"
 
 char * program_name = "readelf";
