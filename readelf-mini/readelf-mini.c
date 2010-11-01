@@ -54,6 +54,11 @@
 
 #undef HAVE_ZLIB_H // pgbovine - remove dependency on libz
 
+// pgbovine - try to eliminate dependency on libiberty
+#define xmalloc malloc
+#define ISPRINT isprint
+
+
 #ifdef HAVE_ZLIB_H
 #include <zlib.h>
 #endif
@@ -153,7 +158,8 @@
 
 #include "getopt.h"
 #include "libiberty.h"
-#include "safe-ctype.h"
+//#include "safe-ctype.h" // pgbovine - this relies on libiberty, so comment it out
+#include "ctype.h"        // pgbovine - instead, just use regular ctype.h for simplicity
 #include "filenames.h"
 
 char * program_name = "readelf";
@@ -2856,6 +2862,8 @@ get_section_type_name (unsigned int sh_type)
 
 #define OPTION_DEBUG_DUMP	512
 
+// pgbovine - no long needed
+#ifdef PGBOVINE_UNDEFINED
 static struct option options[] =
 {
   {"all",	       no_argument, 0, 'a'},
@@ -2944,6 +2952,7 @@ usage (FILE * stream)
 
   exit (stream == stdout ? 0 : 1);
 }
+#endif // PGBOVINE_UNDEFINED
 
 /* Record the fact that the user wants the contents of section number
    SECTION to be displayed using the method(s) encoded as flags bits
@@ -3018,6 +3027,8 @@ request_dump (dump_type type)
 }
 
 
+// pgbovine - this is obsolete ... manually hard-code args
+#ifdef PGBOVINE_UNDEFINED
 static void
 parse_args (int argc, char ** argv)
 {
@@ -3167,6 +3178,7 @@ parse_args (int argc, char ** argv)
       usage (stderr);
     }
 }
+#endif // PGBOVINE_UNDEFINED
 
 static const char *
 get_elf_class (unsigned int elf_class)
@@ -10873,7 +10885,10 @@ static char *
 adjust_relative_path (char * file_name, char * name, int name_len)
 {
   char * member_file_name;
-  const char * base_name = lbasename (file_name);
+  const char * base_name = basename (file_name);
+  // pgbovine - the version below uses libiberty ...
+  // instead just use libc's version (above)
+  //const char * base_name = lbasename (file_name);
 
   /* This is a proxy entry for a thin archive member.
      If the extended name table contains an absolute path
@@ -11577,9 +11592,14 @@ main (int argc, char ** argv)
 {
   int err;
 
+  // pgbovine - don't manually process args
+  /*
   expandargv (&argc, &argv);
-
   parse_args (argc, argv);
+  */
+
+  // activate the "readelf -l" option
+  do_segments++;
 
   if (num_dump_sects > 0)
     {

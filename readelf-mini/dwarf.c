@@ -1,3 +1,8 @@
+// made into a miniature version by Philip Guo for CDE
+// (derived from original version in binutils-2.20.1)
+//
+// some of my comments are marked as 'pgbovine'
+
 /* dwarf.c -- display DWARF contents of a BFD binary file
    Copyright 2005, 2006, 2007, 2008, 2009
    Free Software Foundation, Inc.
@@ -26,6 +31,10 @@
 #include "elf/common.h"
 #include "dwarf2.h"
 #include "dwarf.h"
+
+// pgbovine - try to eliminate dependency on libiberty
+#define xmalloc malloc
+#define xrealloc realloc
 
 static int have_frame_base;
 static int need_base_address;
