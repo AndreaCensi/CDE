@@ -2,6 +2,8 @@
 // (derived from original version in binutils-2.20.1)
 //
 // some of my comments are marked as 'pgbovine'
+//
+// warning, this is not thread-safe since it uses lots of globals :0
 
 __asm__(".symver __xstat64,__xstat64@GLIBC_2.1"); // hack to eliminate glibc 2.2 dependency
 
@@ -11589,10 +11591,117 @@ db_task_printsym (unsigned int addr)
 }
 #endif
 
+
+// pgbovine - look for INTERP section and the name of the program
+// interpreter in this ELF binary.
+// malloc a new string if found
+char* find_program_interpreter(char * file_name) {
+  unsigned int i;
+  FILE* file = fopen (file_name, "rb");
+  assert(file);
+
+  if (! get_file_header (file))
+    {
+      error (_("%s: Failed to read file header\n"), file_name);
+      return NULL;
+    }
+
+  /* Initialise per file variables.  */
+  for (i = ARRAY_SIZE (version_info); i--;)
+    version_info[i] = 0;
+
+  for (i = ARRAY_SIZE (dynamic_info); i--;)
+    dynamic_info[i] = 0;
+
+  /* Initialise the dump_sects array from the cmdline_dump_sects array.
+     Note we do this even if cmdline_dump_sects is empty because we
+     must make sure that the dump_sets array is zeroed out before each
+     object file is processed.  */
+  if (num_dump_sects > num_cmdline_dump_sects)
+    memset (dump_sects, 0, num_dump_sects * sizeof (* dump_sects));
+
+  if (num_cmdline_dump_sects > 0)
+    {
+      if (num_dump_sects == 0)
+	/* A sneaky way of allocating the dump_sects array.  */
+	request_dump_bynumber (num_cmdline_dump_sects, 0);
+
+      assert (num_dump_sects >= num_cmdline_dump_sects);
+      memcpy (dump_sects, cmdline_dump_sects,
+	      num_cmdline_dump_sects * sizeof (* dump_sects));
+    }
+
+  if (! process_file_header ())
+    return NULL;
+
+  if (! process_section_headers (file))
+    {
+      /* Without loaded section headers we cannot process lots of
+	 things.  */
+      do_unwind = do_version = do_dump = do_arch = 0;
+
+      if (! do_using_dynamic)
+	do_syms = do_reloc = 0;
+    }
+
+  if (! process_section_groups (file))
+    {
+      /* Without loaded section groups we cannot process unwind.  */
+      do_unwind = 0;
+    }
+
+  // code extracted from process_program_headers ...
+  Elf_Internal_Phdr * segment;
+
+  if (elf_header.e_phnum == 0) {
+    if (do_segments)
+      printf (_("\nThere are no program headers in this file.\n"));
+    return NULL;
+  }
+
+  if (! get_program_headers (file))
+    return NULL;
+
+  dynamic_addr = 0;
+  dynamic_size = 0;
+
+  for (i = 0, segment = program_headers;
+       i < elf_header.e_phnum;
+       i++, segment++) {
+    switch (segment->p_type) {
+    case PT_INTERP:
+
+	  if (fseek (file, archive_file_offset + (long) segment->p_offset,
+		     SEEK_SET))
+	    error (_("Unable to find program interpreter name\n"));
+	  else
+	    {
+	      char fmt [32];
+	      int ret = snprintf (fmt, sizeof (fmt), "%%%ds", PATH_MAX);
+
+	      if (ret >= (int) sizeof (fmt) || ret < 0)
+		error (_("Internal error: failed to create format string to display program interpreter\n"));
+
+	      program_interpreter[0] = 0;
+	      if (fscanf (file, fmt, program_interpreter) <= 0)
+		error (_("Unable to read program interpreter name\n"));
+
+	      if (do_segments)
+		printf (_("\n      [Requesting program interpreter: %s]"),
+		    program_interpreter);
+	    }
+	  break;
+    }
+  }
+
+  return NULL; // failure
+}
+
+
 int
 main (int argc, char ** argv)
 {
-  int err;
+  int err = 0;
 
   // pgbovine - don't manually process args
   /*
@@ -11603,27 +11712,7 @@ main (int argc, char ** argv)
   // activate the "readelf -l" option
   do_segments++;
 
-  if (num_dump_sects > 0)
-    {
-      /* Make a copy of the dump_sects array.  */
-      cmdline_dump_sects = (dump_type *)
-          malloc (num_dump_sects * sizeof (* dump_sects));
-      if (cmdline_dump_sects == NULL)
-	error (_("Out of memory allocating dump request table.\n"));
-      else
-	{
-	  memcpy (cmdline_dump_sects, dump_sects,
-		  num_dump_sects * sizeof (* dump_sects));
-	  num_cmdline_dump_sects = num_dump_sects;
-	}
-    }
-
-  if (optind < (argc - 1))
-    show_name = 1;
-
-  err = 0;
-  while (optind < argc)
-    err |= process_file (argv[optind++]);
+  find_program_interpreter(argv[1]);
 
   if (dump_sects != NULL)
     free (dump_sects);
