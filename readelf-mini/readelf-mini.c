@@ -11597,7 +11597,7 @@ db_task_printsym (unsigned int addr)
 //
 // malloc a new string if found (dynamically-linked binary),
 // return NULL if not found (static binary or non-ELF file)
-char* find_program_interpreter(char * file_name) {
+char* find_ELF_program_interpreter(char * file_name) {
   unsigned int i;
   FILE* file = fopen (file_name, "rb");
   assert(file);
@@ -11704,7 +11704,7 @@ main (int argc, char ** argv)
   // activate the "readelf -l" option
   do_segments++;
 
-  char* x = find_program_interpreter(argv[1]);
+  char* x = find_ELF_program_interpreter(argv[1]);
   if (x) {
     printf("Interpreter: %s\n", x);
   }

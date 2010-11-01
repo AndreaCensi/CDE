@@ -29,6 +29,7 @@ char orig_run_cde_starting_pwd[MAXPATHLEN];
 // to shut up gcc warnings without going thru #include hell
 extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
+extern char* find_ELF_program_interpreter(char * file_name); // from ../readelf-mini/libreadelf-mini.a
 
 // prepend "cde-root" to the given path string, assumes that the string
 // starts with '/' (i.e., it's an absolute path)
@@ -657,10 +658,17 @@ void CDE_begin_execve(struct tcb* tcp) {
   fclose(f);
 
   if (is_elf_binary) {
-    // TODO: look for whether it's a statically-linked binary ...
+    // look for whether it's a statically-linked binary ...
     // if so, then there is NO need to call ld-linux.so.2 on it;
     // we can just execute it directly (in fact, ld-linux.so.2
     // will fail on static binaries!)
+
+    // mallocs a new name
+    char* interpreter_name = find_ELF_program_interpreter(path_to_executable);
+    //printf("interpreter_name: %s\n", interpreter_name);
+    if (interpreter_name) {
+      free(interpreter_name);
+    }
   }
   else {
     // find out whether it's a script file (starting with #! line)
