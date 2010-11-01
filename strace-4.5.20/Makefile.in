@@ -96,7 +96,7 @@ am__mv = mv -f
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 CCLD = $(CC)
-LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
+LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) ../readelf-mini/libreadelf-mini.a -o $@ # pgbovine
 SOURCES = $(strace_SOURCES)
 DIST_SOURCES = $(strace_SOURCES)
 man1dir = $(mandir)/man1
