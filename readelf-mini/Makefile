@@ -4,7 +4,10 @@
 libreadelf-mini.a: readelf-mini.o version.o unwind-ia64.o dwarf.o
 	ar rcs libreadelf-mini.a readelf-mini.o version.o unwind-ia64.o dwarf.o
 
+readelf-mini: readelf-mini.o version.o unwind-ia64.o dwarf.o
+	gcc -o readelf-mini readelf-mini.o version.o unwind-ia64.o dwarf.o
+
 all: libreadelf-mini.a
 
 clean:
-	rm libreadelf-mini.a *.o
+	rm -f libreadelf-mini.a readelf-mini *.o

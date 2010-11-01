@@ -198,7 +198,7 @@ static int do_reloc;
 static int do_sections;
 static int do_section_groups;
 static int do_section_details;
-static int do_segments;
+static int do_segments = 1; // pgbovine - activate the "readelf -l" option
 static int do_unwind;
 static int do_using_dynamic;
 static int do_header;
@@ -11598,6 +11598,7 @@ db_task_printsym (unsigned int addr)
 // malloc a new string if found (dynamically-linked binary),
 // return NULL if not found (static binary or non-ELF file)
 char* find_ELF_program_interpreter(char * file_name) {
+  char* program_interpreter_newstring = NULL;
   unsigned int i;
   FILE* file = fopen (file_name, "rb");
   assert(file);
@@ -11605,7 +11606,7 @@ char* find_ELF_program_interpreter(char * file_name) {
   if (! get_file_header (file))
     {
       error (_("%s: Failed to read file header\n"), file_name);
-      return NULL;
+      goto done;
     }
 
   /* Initialise per file variables.  */
@@ -11634,7 +11635,7 @@ char* find_ELF_program_interpreter(char * file_name) {
     }
 
   if (! process_file_header ())
-    return NULL;
+    goto done;
 
   if (! process_section_headers (file))
     {
@@ -11658,11 +11659,11 @@ char* find_ELF_program_interpreter(char * file_name) {
   if (elf_header.e_phnum == 0) {
     if (do_segments)
       printf (_("\nThere are no program headers in this file.\n"));
-    return NULL;
+    goto done;
   }
 
   if (! get_program_headers (file))
-    return NULL;
+    goto done;
 
   dynamic_addr = 0;
   dynamic_size = 0;
@@ -11673,26 +11674,105 @@ char* find_ELF_program_interpreter(char * file_name) {
     switch (segment->p_type) {
     case PT_INTERP:
       if (fseek (file, archive_file_offset + (long) segment->p_offset,
-           SEEK_SET))
+           SEEK_SET)) {
         error (_("Unable to find program interpreter name\n"));
+        goto done;
+        }
       else {
         char fmt [32];
         int ret = snprintf (fmt, sizeof (fmt), "%%%ds", PATH_MAX);
 
-        if (ret >= (int) sizeof (fmt) || ret < 0)
+        if (ret >= (int) sizeof (fmt) || ret < 0) {
           error (_("Internal error: failed to create format string to display program interpreter\n"));
+          goto done;
+        }
 
         program_interpreter[0] = 0;
-        if (fscanf (file, fmt, program_interpreter) <= 0)
+        if (fscanf (file, fmt, program_interpreter) <= 0) {
           error (_("Unable to read program interpreter name\n"));
+          goto done;
+        }
 
-        return strdup(program_interpreter); // mallocs a new string
+        program_interpreter_newstring = strdup(program_interpreter); // mallocs a new string
+        break;
       }
 	  break;
     }
   }
 
-  return NULL; // failure
+done:
+
+  fclose(file);
+
+  // clean-up code stolen from process_object()
+  // VERY IMPORTANT if we want to run this function more than once on
+  // different ELF binary files!!!
+  if (program_headers)
+    {
+      free (program_headers);
+      program_headers = NULL;
+    }
+
+  if (section_headers)
+    {
+      free (section_headers);
+      section_headers = NULL;
+    }
+
+  if (string_table)
+    {
+      free (string_table);
+      string_table = NULL;
+      string_table_length = 0;
+    }
+
+  if (dynamic_strings)
+    {
+      free (dynamic_strings);
+      dynamic_strings = NULL;
+      dynamic_strings_length = 0;
+    }
+
+  if (dynamic_symbols)
+    {
+      free (dynamic_symbols);
+      dynamic_symbols = NULL;
+      num_dynamic_syms = 0;
+    }
+
+  if (dynamic_syminfo)
+    {
+      free (dynamic_syminfo);
+      dynamic_syminfo = NULL;
+    }
+
+  if (section_headers_groups)
+    {
+      free (section_headers_groups);
+      section_headers_groups = NULL;
+    }
+
+  if (section_groups)
+    {
+      struct group_list * g;
+      struct group_list * next;
+
+      for (i = 0; i < group_count; i++)
+	{
+	  for (g = section_groups [i].root; g != NULL; g = next)
+	    {
+	      next = g->next;
+	      free (g);
+	    }
+	}
+
+      free (section_groups);
+      section_groups = NULL;
+    }
+
+  free_debug_memory ();
+
+  return program_interpreter_newstring;
 }
 
 
@@ -11702,11 +11782,21 @@ int
 main (int argc, char ** argv)
 {
   // activate the "readelf -l" option
-  do_segments++;
+  //do_segments++;
 
   char* x = find_ELF_program_interpreter(argv[1]);
   if (x) {
     printf("Interpreter: %s\n", x);
+    free(x);
+  }
+  else {
+    printf("Static executable\n");
+  }
+
+  x = find_ELF_program_interpreter(argv[2]);
+  if (x) {
+    printf("Interpreter: %s\n", x);
+    free(x);
   }
   else {
     printf("Static executable\n");

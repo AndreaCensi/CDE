@@ -898,12 +898,9 @@ main(int argc, char *argv[])
 
     // pgbovine - copy 'cde' executable to pwd and rename it 'cde-exec',
     // so that it can be included in the executable
-    // TODO: make these into lazy copies:
     copy_file(argv[0], "cde-exec");
 
     mkdir(CDE_ROOT, 0777);
-    // also copy over dynamic linker to pwd to include it in package
-    copy_file("/lib/ld-linux.so.2", CDE_ROOT "/ld-linux.so.2");
 
     // save cde_starting_pwd into a file as well
     FILE* f = fopen(CDE_ROOT "/cde_starting_pwd.txt", "w");

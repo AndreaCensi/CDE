@@ -593,13 +593,14 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
 
 
 void CDE_begin_execve(struct tcb* tcp) {
+  char* ld_linux_filename = NULL;
   char* ld_linux_fullpath = NULL;
 
   assert(!tcp->opened_filename);
   tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
 
   // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
-  // is a valid executable file WITHIN cde-root/ ... otherwise don't do
+  // is a valid executable file ... otherwise don't do
   // anything and simply let the execve fail just like it's supposed to
   struct stat filename_stat;
 
@@ -631,8 +632,8 @@ void CDE_begin_execve(struct tcb* tcp) {
   }
   assert(path_to_executable);
 
-  // ld-linux.so.2 only works on dynamically-linked binary executable
-  // files; it will fail if you invoke it on:
+  // WARNING: ld-linux.so.2 only works on dynamically-linked binary
+  // executable files; it will fail if you invoke it on:
   //   - a textual script file
   //   - a statically-linked binary
   //
@@ -641,8 +642,6 @@ void CDE_begin_execve(struct tcb* tcp) {
   //
   // e.g., #! /bin/sh
   // e.g., #! /usr/bin/env python
-  //
-  // TODO: for a statically-linked binary, don't do anything
   char is_textual_script = 0;
   char is_elf_binary = 0;
   char* script_command = NULL;
@@ -663,12 +662,15 @@ void CDE_begin_execve(struct tcb* tcp) {
     // we can just execute it directly (in fact, ld-linux.so.2
     // will fail on static binaries!)
 
-    // mallocs a new name
-    char* interpreter_name = find_ELF_program_interpreter(path_to_executable);
-    //printf("interpreter_name: %s\n", interpreter_name);
-    if (interpreter_name) {
-      free(interpreter_name);
+    // mallocs a new string if successful
+    // (this string is most likely "/lib/ld-linux.so.2")
+    ld_linux_filename = find_ELF_program_interpreter(path_to_executable);
+    if (!ld_linux_filename) {
+      // if the program interpreter isn't found, then it's a static
+      // binary, so let the execve call proceed unmodified
+      goto done;
     }
+    assert(IS_ABSPATH(ld_linux_filename));
   }
   else {
     // find out whether it's a script file (starting with #! line)
@@ -687,8 +689,28 @@ void CDE_begin_execve(struct tcb* tcp) {
       }
     }
     free(tmp);
+
+    // now find the program interpreter for the script_command
+    // executable, be sure to grab the FIRST TOKEN since that's
+    // the actual executable name ...
+    // mallocs a new string if successful
+    // (this string is most likely "/lib/ld-linux.so.2")
+
+    // libc is so dumb ... strtok() alters its argument in an un-kosher way
+    tmp = strdup(script_command);
+    char* p = strtok(tmp, " ");
+    ld_linux_filename = find_ELF_program_interpreter(p);
+    free(tmp);
+
+    if (!ld_linux_filename) {
+      // if the program interpreter isn't found, then it's a static
+      // binary, so let the execve call proceed unmodified
+      goto done;
+    }
+    assert(IS_ABSPATH(ld_linux_filename));
   }
 
+  assert(!(is_elf_binary && is_textual_script));
 
   if (CDE_exec_mode) {
     // set up shared memory segment if we haven't done so yet
@@ -702,21 +724,21 @@ void CDE_begin_execve(struct tcb* tcp) {
       goto done; // MUST punt early here!!!
     }
 
-    ld_linux_fullpath = create_abspath_within_cderoot("/ld-linux.so.2");
+    ld_linux_fullpath = create_abspath_within_cderoot(ld_linux_filename);
 
     /* we're gonna do some craziness here to redirect the OS to call
-       cde-root/ld-linux.so.2 rather than the real program, since
+       cde-root/lib/ld-linux.so.2 rather than the real program, since
        ld-linux.so.2 is closely-tied with the version of libc in
        cde-root/. */
     if (is_textual_script) {
       /*  we're running a script with a shebang (#!), so
           let's set up the shared memory segment (tcp->localshm) like so:
 
-    base -->       tcp->localshm : "cde-root/ld-linux.so.2"
+    base -->       tcp->localshm : "cde-root/lib/ld-linux.so.2" (ld_linux_fullpath)
           script_command token 0 : "/usr/bin/env"
           script_command token 1 : "python"
               ... (for as many tokens as available) ...
-    new_argv -->   argv pointers : point to tcp->childshm ("cde-root/ld-linux.so.2")
+    new_argv -->   argv pointers : point to tcp->childshm ("cde-root/lib/ld-linux.so.2")
                    argv pointers : point to script_command token 0
                    argv pointers : point to script_command token 1
               ... (for as many tokens as available) ...
@@ -756,7 +778,7 @@ void CDE_begin_execve(struct tcb* tcp) {
       // really subtle, these addresses should be in the CHILD's address space,
       // not the parent's
 
-      // points to "cde-root/ld-linux.so.2"
+      // points to ld_linux_fullpath
       new_argv[0] = (char*)tcp->childshm;
 
       // points to all the tokens of script_command
@@ -804,8 +826,8 @@ void CDE_begin_execve(struct tcb* tcp) {
       /* we're running a dynamically-linked binary executable, go
          let's set up the shared memory segment (tcp->localshm) like so:
 
-    base -->       tcp->localshm : "cde-root/ld-linux.so.2"
-    new_argv -->   argv pointers : point to tcp->childshm ("cde-root/ld-linux.so.2")
+    base -->       tcp->localshm : "cde-root/lib/ld-linux.so.2" (ld_linux_fullpath)
+    new_argv -->   argv pointers : point to tcp->childshm ("cde-root/lib/ld-linux.so.2")
                    argv pointers : point to tcp->u_arg[0] (original program name)
                    argv pointers : point to child program's argv[1]
                    argv pointers : point to child program's argv[2]
@@ -869,6 +891,11 @@ void CDE_begin_execve(struct tcb* tcp) {
     }
   }
   else {
+    if (ld_linux_filename) {
+      // copy ld-linux.so.2 (or whatever the program interpreter is) into cde-root
+      copy_file_into_cde_root(ld_linux_filename, tcp->current_dir);
+    }
+
     // very subtle!  if we're executing a textual script with a #!, we
     // need to grab the name of the executable from the #! string into
     // cde-root, since strace doesn't normally pick it up as a dependency
@@ -892,6 +919,10 @@ done:
 
   if (script_command) {
     free(script_command);
+  }
+
+  if (ld_linux_filename) {
+    free(ld_linux_filename);
   }
 
   if (ld_linux_fullpath) {
