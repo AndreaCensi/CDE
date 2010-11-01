@@ -1,5 +1,7 @@
-// made into a miniature version by Philip Guo (derived from
-// original version in binutils-2.20.1)
+// made into a miniature version by Philip Guo for CDE
+// (derived from original version in binutils-2.20.1)
+//
+// some of my comments are marked as 'pgbovine'
 
 /* readelf.c -- display contents of an ELF format file
    Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007,
@@ -49,6 +51,9 @@
 #include <assert.h>
 #include <sys/stat.h>
 #include <time.h>
+
+#undef HAVE_ZLIB_H // pgbovine - remove dependency on libz
+
 #ifdef HAVE_ZLIB_H
 #include <zlib.h>
 #endif
@@ -11571,15 +11576,6 @@ int
 main (int argc, char ** argv)
 {
   int err;
-
-#if defined (HAVE_SETLOCALE) && defined (HAVE_LC_MESSAGES)
-  setlocale (LC_MESSAGES, "");
-#endif
-#if defined (HAVE_SETLOCALE)
-  setlocale (LC_CTYPE, "");
-#endif
-  bindtextdomain (PACKAGE, LOCALEDIR);
-  textdomain (PACKAGE);
 
   expandargv (&argc, &argv);
 
