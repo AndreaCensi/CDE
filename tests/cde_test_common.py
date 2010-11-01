@@ -13,6 +13,7 @@ def clear_cde_root():
 def generic_lib_checks():
   assert os.path.islink('cde-root/lib/libc.so.6')
   assert os.readlink('cde-root/lib/libc.so.6') == 'libc-2.8.so'
+  assert os.path.isfile('cde-root/lib/ld-linux.so.2')
 
 def run_cde(argv, silent=False):
   (stdout, stderr) = Popen([CDE_BIN] + argv, stdout=PIPE, stderr=PIPE).communicate()
@@ -58,13 +59,14 @@ def run_and_cmp_cde_exec(argv, prev_stdout, prev_stderr):
     (stdout, stderr) = Popen(["rm", "-rf", tmp_test_dir], stdout=PIPE, stderr=PIPE).communicate()
 
 
-def generic_test_runner(argv, checker_func):
+def generic_test_runner(argv, checker_func, skip_generic_lib_checks=False):
   clear_cde_root()
   (stdout, stderr) = run_cde(argv)
 
   checker_func()
 
-  generic_lib_checks()
+  if not skip_generic_lib_checks:
+    generic_lib_checks()
 
   run_and_cmp_cde_exec(argv, stdout, stderr)
 
