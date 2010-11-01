@@ -11594,7 +11594,9 @@ db_task_printsym (unsigned int addr)
 
 // pgbovine - look for INTERP section and the name of the program
 // interpreter in this ELF binary.
-// malloc a new string if found
+//
+// malloc a new string if found (dynamically-linked binary),
+// return NULL if not found (static binary or non-ELF file)
 char* find_program_interpreter(char * file_name) {
   unsigned int i;
   FILE* file = fopen (file_name, "rb");
@@ -11670,26 +11672,22 @@ char* find_program_interpreter(char * file_name) {
        i++, segment++) {
     switch (segment->p_type) {
     case PT_INTERP:
+      if (fseek (file, archive_file_offset + (long) segment->p_offset,
+           SEEK_SET))
+        error (_("Unable to find program interpreter name\n"));
+      else {
+        char fmt [32];
+        int ret = snprintf (fmt, sizeof (fmt), "%%%ds", PATH_MAX);
 
-	  if (fseek (file, archive_file_offset + (long) segment->p_offset,
-		     SEEK_SET))
-	    error (_("Unable to find program interpreter name\n"));
-	  else
-	    {
-	      char fmt [32];
-	      int ret = snprintf (fmt, sizeof (fmt), "%%%ds", PATH_MAX);
+        if (ret >= (int) sizeof (fmt) || ret < 0)
+          error (_("Internal error: failed to create format string to display program interpreter\n"));
 
-	      if (ret >= (int) sizeof (fmt) || ret < 0)
-		error (_("Internal error: failed to create format string to display program interpreter\n"));
+        program_interpreter[0] = 0;
+        if (fscanf (file, fmt, program_interpreter) <= 0)
+          error (_("Unable to read program interpreter name\n"));
 
-	      program_interpreter[0] = 0;
-	      if (fscanf (file, fmt, program_interpreter) <= 0)
-		error (_("Unable to read program interpreter name\n"));
-
-	      if (do_segments)
-		printf (_("\n      [Requesting program interpreter: %s]"),
-		    program_interpreter);
-	    }
+        return strdup(program_interpreter); // mallocs a new string
+      }
 	  break;
     }
   }
@@ -11698,26 +11696,28 @@ char* find_program_interpreter(char * file_name) {
 }
 
 
+// comment-out main so that we can make this into a library
+/*
 int
 main (int argc, char ** argv)
 {
-  int err = 0;
-
-  // pgbovine - don't manually process args
-  /*
-  expandargv (&argc, &argv);
-  parse_args (argc, argv);
-  */
-
   // activate the "readelf -l" option
   do_segments++;
 
-  find_program_interpreter(argv[1]);
+  char* x = find_program_interpreter(argv[1]);
+  if (x) {
+    printf("Interpreter: %s\n", x);
+  }
+  else {
+    printf("Static executable\n");
+  }
 
   if (dump_sects != NULL)
     free (dump_sects);
   if (cmdline_dump_sects != NULL)
     free (cmdline_dump_sects);
 
-  return err;
+  return 0;
 }
+*/
+
