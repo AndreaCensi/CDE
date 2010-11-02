@@ -693,6 +693,8 @@ void CDE_begin_execve(struct tcb* tcp) {
     // now find the program interpreter for the script_command
     // executable, be sure to grab the FIRST TOKEN since that's
     // the actual executable name ...
+    // TODO: this will fail if the executable's path has a space in it
+    //
     // mallocs a new string if successful
     // (this string is most likely "/lib/ld-linux.so.2")
 
@@ -763,6 +765,8 @@ void CDE_begin_execve(struct tcb* tcp) {
       int script_command_num_tokens = 0;
 
       // tokenize script_command into tokens, and insert them into argv
+      // TODO: this will fail if the shebang line contains file paths
+      // with spaces, quotes, or other weird characters!
       char* p;
       for (p = strtok(script_command, " "); p; p = strtok(NULL, " ")) {
         //printf("  token = %s\n", p);

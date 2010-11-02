@@ -306,53 +306,6 @@ void mkdir_recursive(char* fullpath, int pop_one) {
   delete_path(p);
 }
 
-#ifdef PGBOVINE_DEPRECATED
-// gets the absolute path of filename, WITHOUT following any symlinks
-// (for relative paths, calculate their locations relative to
-//  relative_path_basedir)
-//
-// however, note that if any parent directory specified in filename is a
-// symlink, it WILL follow the symlink.  it just doesn't follow symlinks
-// specified by the (basename of) file
-//
-// mallocs a new string
-char* realpath_nofollow_DEPRECATED(char* filename, char* relative_path_basedir) {
-  assert(!CDE_exec_mode);
-  assert(IS_ABSPATH(relative_path_basedir));
-
-  char* ret = NULL;
-  if (IS_ABSPATH(filename)) {
-    char* bn = basename(filename); // doesn't destroy its arg
-
-    char* filename_copy = strdup(filename); // dirname() destroys its arg
-    char* dir = dirname(filename_copy);
-
-    char* dir_realpath = realpath_strdup(dir);
-    ret = format("%s/%s", dir_realpath, bn);
-    free(dir_realpath);
-    free(filename_copy);
-  }
-  else {
-    // for relative links, find them with respect to relative_path_basedir
-    char* tmp = format("%s/%s", relative_path_basedir, filename);
-    char* bn = basename(tmp); // doesn't destroy its arg
-
-    char* tmp_copy = strdup(tmp); // dirname() destroys its arg
-    char* dir = dirname(tmp_copy);
-
-    char* dir_realpath = realpath_strdup(dir);
-    ret = format("%s/%s", dir_realpath, bn);
-
-    free(dir_realpath);
-    free(tmp_copy);
-    free(tmp);
-  }
-
-  assert(ret);
-  return ret;
-}
-#endif // PGBOVINE_DEPRECATED
-
 
 // return 1 iff the absolute path of filename is within target_dir
 // (for relative paths, calculate their locations relative to relative_path_basedir)
@@ -423,59 +376,6 @@ int file_is_within_dir(char* filename, char* target_dir, char* relative_path_bas
 
   return is_within_pwd;
 }
-
-#ifdef PGBOVINE_DEPRECATED
-// return 1 iff the absolute path of filename is within target_dir
-// (for relative paths, calculate their locations relative to
-//  relative_path_basedir)
-//
-// Pre-req: filename must actually exist on the filesystem!
-int file_is_within_dir_OLD(char* filename, char* target_dir, char* relative_path_basedir) {
-  assert(!CDE_exec_mode);
-  assert(IS_ABSPATH(relative_path_basedir));
-
-  char* path_to_check = NULL;
-  if (IS_ABSPATH(filename)) {
-    path_to_check = strdup(filename);
-  }
-  else {
-    // note that the target program might have done a chdir, so we need to handle that ;)
-    path_to_check = format("%s/%s", relative_path_basedir, filename);
-  }
-  assert(path_to_check);
-
-  // just do a substring comparison against target_dir
-  char* path_to_check_copy = strdup(path_to_check);
-  char* dn = dirname(path_to_check_copy);
-
-  char* dn_realpath = realpath_strdup(dn);
-  int dn_len = strlen(dn_realpath);
-
-  char* targetdir_realpath = realpath_strdup(target_dir);
-  int targetdir_len = strlen(targetdir_realpath);
-
-  // special case hack - if dn_realpath ends with '/.', then take its dirname
-  // AGAIN to get rid of this annoyance :)
-  while ((dn_len >= 2) &&
-          dn_realpath[dn_len - 2] == '/' &&
-          dn_realpath[dn_len - 1] == '.') {
-    dn_realpath = dirname(dn_realpath);
-    dn_len = strlen(dn_realpath);
-  }
-
-  char is_within_pwd = 0;
-  if ((targetdir_len <= dn_len) && strncmp(dn_realpath, targetdir_realpath, targetdir_len) == 0) {
-    is_within_pwd = 1;
-  }
-
-  free(path_to_check);
-  free(path_to_check_copy);
-  free(dn_realpath);
-  free(targetdir_realpath);
-
-  return is_within_pwd;
-}
-#endif // PGBOVINE_DEPRECATED
 
 
 // useful utility function from ccache codebase
