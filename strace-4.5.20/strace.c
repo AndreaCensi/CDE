@@ -186,41 +186,19 @@ usage(ofp, exitval)
 FILE *ofp;
 int exitval;
 {
-	fprintf(ofp, "\
-Modified by Philip Guo (pg@cs.stanford.edu) for the CDE project\n\
-\n\
-(the options below might not work as expected)\n\
-\n\
-usage: strace [-dffhiqrtttTvVxx] [-a column] [-e expr] ... [-o file]\n\
-              [-p pid] ... [-s strsize] [-u username] [-E var=val] ...\n\
-              [command [arg ...]]\n\
-   or: strace -c -D [-e expr] ... [-O overhead] [-S sortby] [-E var=val] ...\n\
-              [command [arg ...]]\n\
--c -- count time, calls, and errors for each syscall and report summary\n\
--f -- follow forks, -ff -- with output into separate files\n\
--F -- attempt to follow vforks, -h -- print help message\n\
--i -- print instruction pointer at time of syscall\n\
--q -- suppress messages about attaching, detaching, etc.\n\
--r -- print relative timestamp, -t -- absolute timestamp, -tt -- with usecs\n\
--T -- print time spent in each syscall, -V -- print version\n\
--v -- verbose mode: print unabbreviated argv, stat, termio[s], etc. args\n\
--x -- print non-ascii strings in hex, -xx -- print all strings in hex\n\
--a column -- alignment COLUMN for printing syscall results (default %d)\n\
--e expr -- a qualifying expression: option=[!]all or option=[!]val1[,val2]...\n\
-   options: trace, abbrev, verbose, raw, signal, read, or write\n\
--o file -- send trace output to FILE instead of stderr\n\
--O overhead -- set overhead for tracing syscalls to OVERHEAD usecs\n\
--p pid -- trace process with process id PID, may be repeated\n\
--D -- run tracer process as a detached grandchild, not as parent\n\
--s strsize -- limit length of print strings to STRSIZE chars (default %d)\n\
--S sortby -- sort syscall counts by: time, calls, name, nothing (default %s)\n\
--u username -- run command as username handling setuid and/or setgid\n\
--E var=val -- put var=val in the environment for command\n\
--E var -- remove var from the environment for command\n\
-" /* this is broken, so don't document it
--z -- print only succeeding syscalls\n\
-  */
-, DEFAULT_ACOLUMN, DEFAULT_STRLEN, DEFAULT_SORTBY);
+  if (CDE_exec_mode) {
+    fprintf(ofp,
+            "CDE: automatic packaging of Code, Data, and Environment\n"
+            "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n\n"
+            "usage: cde-exec <command within cde-root/ to run>\n"
+            "(see cde.log for possible commands within this CDE package)\n");
+  }
+  else {
+    fprintf(ofp,
+            "CDE: automatic packaging of Code, Data, and Environment\n"
+            "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n\n"
+            "usage: cde <command to run and package>\n");
+  }
 	exit(exitval);
 }
 
