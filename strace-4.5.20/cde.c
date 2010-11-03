@@ -1,7 +1,9 @@
 #include "cde.h"
 #include "paths.h"
 
+#if defined (I386)
 __asm__(".symver shmctl,shmctl@GLIBC_2.0"); // hack to eliminate glibc 2.2 dependency
+#endif
 
 // 1 if we are executing code in a CDE package,
 // 0 for tracing regular execution
@@ -384,7 +386,15 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
 
   struct user_regs_struct cur_regs;
   EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
   cur_regs.ebx = (long)tcp->childshm;
+#elif defined(X86_64)
+  cur_regs.rbx = (long)tcp->childshm;
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
   ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
   free(redirected_filename);
@@ -421,8 +431,17 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 
     struct user_regs_struct cur_regs;
     EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
     cur_regs.ebx = (long)tcp->childshm;
     cur_regs.ecx = (long)(((char*)tcp->childshm) + len1 + 1);
+#elif defined(X86_64)
+    cur_regs.rbx = (long)tcp->childshm;
+    cur_regs.rcx = (long)(((char*)tcp->childshm) + len1 + 1);
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
 
     //static char tmp[MAXPATHLEN];
@@ -436,7 +455,15 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 
     struct user_regs_struct cur_regs;
     EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
     cur_regs.ebx = (long)tcp->childshm; // only set EBX
+#elif defined(X86_64)
+    cur_regs.rbx = (long)tcp->childshm; // only set EBX
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
   }
   else if (redirected_filename2) {
@@ -444,7 +471,15 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 
     struct user_regs_struct cur_regs;
     EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
     cur_regs.ecx = (long)tcp->childshm; // only set ECX
+#elif defined(X86_64)
+    cur_regs.rcx = (long)tcp->childshm; // only set ECX
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
     ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
   }
 
@@ -822,8 +857,17 @@ void CDE_begin_execve(struct tcb* tcp) {
       // to alter the arguments of the execv system call :0
       struct user_regs_struct cur_regs;
       EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
       cur_regs.ebx = (long)tcp->childshm;            // location of base
       cur_regs.ecx = ((long)tcp->childshm) + ((char*)new_argv - base); // location of new_argv
+#elif defined(X86_64)
+      cur_regs.rbx = (long)tcp->childshm;            // location of base
+      cur_regs.rcx = ((long)tcp->childshm) + ((char*)new_argv - base); // location of new_argv
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
       ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
     }
     else {
@@ -889,8 +933,17 @@ void CDE_begin_execve(struct tcb* tcp) {
       // to alter the arguments of the execv system call :0
       struct user_regs_struct cur_regs;
       EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
       cur_regs.ebx = (long)tcp->childshm;            // location of base
       cur_regs.ecx = ((long)tcp->childshm) + offset; // location of new_argv
+#elif defined(X86_64)
+      cur_regs.rbx = (long)tcp->childshm;            // location of base
+      cur_regs.rcx = ((long)tcp->childshm) + offset; // location of new_argv
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
       ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs);
     }
   }
@@ -1313,6 +1366,7 @@ static void begin_setup_shmat(struct tcb* tcp) {
   tcp->savedword = ptrace(PTRACE_PEEKDATA, tcp->pid, tcp->savedaddr, 0);
   EXITIF(errno); // PTRACE_PEEKDATA reports error in errno
 
+#if defined (I386)
   /* The shmat call is implemented as a godawful sys_ipc. */
   cur_regs.orig_eax = __NR_ipc;
   /* The parameters are passed in ebx, ecx, edx, esi, edi, and ebp */
@@ -1327,6 +1381,19 @@ static void begin_setup_shmat(struct tcb* tcp) {
                                           child's address space. */
   cur_regs.edi = (long)NULL; /* We don't use shmat's shmaddr */
   cur_regs.ebp = 0; /* The "fifth" argument is unused. */
+#elif defined(X86_64)
+  // there is a direct shmat syscall in x86-64
+  //
+  // according to this page:
+  //   http://stackoverflow.com/questions/2535989/what-are-the-calling-conventions-for-unix-linux-system-calls-on-x86-64
+  // the first 3 syscall parameters are passed in %rdi, %rsi, %rdx
+  cur_regs.orig_rax = __NR_shmat;
+  cur_regs.rdi = tcp->shmid;
+  cur_regs.rsi = 0;
+  cur_regs.rdx = 0;
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
 
   EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
 
@@ -1336,6 +1403,8 @@ static void begin_setup_shmat(struct tcb* tcp) {
 void finish_setup_shmat(struct tcb* tcp) {
   struct user_regs_struct cur_regs;
   EXITIF(ptrace(PTRACE_GETREGS, tcp->pid, NULL, (long)&cur_regs) < 0);
+
+#if defined (I386)
   // setup had better been a success!
   assert(cur_regs.orig_eax == __NR_ipc);
   assert(cur_regs.eax == 0);
@@ -1343,15 +1412,35 @@ void finish_setup_shmat(struct tcb* tcp) {
   errno = 0;
   tcp->childshm = (void*)ptrace(PTRACE_PEEKDATA, tcp->pid, tcp->savedaddr, 0);
   EXITIF(errno); // PTRACE_PEEKDATA reports error in errno
+#elif defined(X86_64)
+  // there seems to be a direct shmat syscall in x86-64
+  assert(cur_regs.orig_rax == __NR_shmat);
+
+  // the return value of the shmat syscall is in %rax
+  tcp->childshm = (void*)cur_regs.rax;
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
 
   // restore original data in child's address space
   EXITIF(ptrace(PTRACE_POKEDATA, tcp->pid, tcp->savedaddr, tcp->savedword));
 
+#if defined (I386)
   tcp->saved_regs.eax = tcp->saved_regs.orig_eax;
 
   // back up IP so that we can re-execute previous instruction
   // TODO: is the use of 2 specific to 32-bit machines???
   tcp->saved_regs.eip = tcp->saved_regs.eip - 2;
+#elif defined(X86_64)
+  tcp->saved_regs.rax = tcp->saved_regs.orig_rax;
+
+  // back up IP so that we can re-execute previous instruction
+  // TODO: should I set the offset to -4 for 64-bit since I set it to -2 for 32-bit?
+  tcp->saved_regs.rip = tcp->saved_regs.rip - 4;
+#else
+  #error "Unknown architecture (not I386 or X86_64)"
+#endif
+
   EXITIF(ptrace(PTRACE_SETREGS, tcp->pid, NULL, (long)&tcp->saved_regs) < 0);
 
   assert(tcp->childshm);

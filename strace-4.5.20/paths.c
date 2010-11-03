@@ -5,10 +5,12 @@
 
 extern char CDE_exec_mode;
 
+#if defined (I386)
 // This forces gcc to use an older version of realpath from glibc 2.0,
 // to maximize backwards compatibility
 // See: http://www.trevorpounds.com/blog/?p=103
 __asm__(".symver realpath,realpath@GLIBC_2.0");
+#endif
 
 #include <stdarg.h>
 extern char* format(const char *format, ...);
