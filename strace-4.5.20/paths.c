@@ -5,6 +5,7 @@
 
 extern char CDE_exec_mode;
 
+// TODO: eliminate this hack if it results in a compile-time error
 #if defined (I386)
 // This forces gcc to use an older version of realpath from glibc 2.0,
 // to maximize backwards compatibility

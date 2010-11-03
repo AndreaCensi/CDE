@@ -1,6 +1,24 @@
+
+
+/* System call calling conventions:
+  
+   According to this page:
+     http://stackoverflow.com/questions/2535989/what-are-the-calling-conventions-for-unix-linux-system-calls-on-x86-64
+
+  32-bit x86:
+    syscall number: %eax
+    first 6 syscall parameters: %ebx, %ecx, %edx, %esi, %edi, %ebp
+
+  64-bit x86-64:
+    syscall number: %rax
+    first 6 syscall parameters: %rdi, %rsi, %rdx, %rcx, %r8 and %r9
+
+*/
+
 #include "cde.h"
 #include "paths.h"
 
+// TODO: eliminate this hack if it results in a compile-time error
 #if defined (I386)
 __asm__(".symver shmctl,shmctl@GLIBC_2.0"); // hack to eliminate glibc 2.2 dependency
 #endif
@@ -459,7 +477,7 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 #if defined (I386)
     cur_regs.ebx = (long)tcp->childshm; // only set EBX
 #elif defined(X86_64)
-    cur_regs.rdi = (long)tcp->childshm; // only set EBX
+    cur_regs.rdi = (long)tcp->childshm;
 #else
   #error "Unknown architecture (not I386 or X86_64)"
 #endif
@@ -475,7 +493,7 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 #if defined (I386)
     cur_regs.ecx = (long)tcp->childshm; // only set ECX
 #elif defined(X86_64)
-    cur_regs.rsi = (long)tcp->childshm; // only set ECX
+    cur_regs.rsi = (long)tcp->childshm;
 #else
   #error "Unknown architecture (not I386 or X86_64)"
 #endif
@@ -862,8 +880,8 @@ void CDE_begin_execve(struct tcb* tcp) {
       cur_regs.ebx = (long)tcp->childshm;            // location of base
       cur_regs.ecx = ((long)tcp->childshm) + ((char*)new_argv - base); // location of new_argv
 #elif defined(X86_64)
-      cur_regs.rdi = (long)tcp->childshm;            // location of base
-      cur_regs.rsi = ((long)tcp->childshm) + ((char*)new_argv - base); // location of new_argv
+      cur_regs.rdi = (long)tcp->childshm;
+      cur_regs.rsi = ((long)tcp->childshm) + ((char*)new_argv - base);
 #else
   #error "Unknown architecture (not I386 or X86_64)"
 #endif
@@ -938,8 +956,8 @@ void CDE_begin_execve(struct tcb* tcp) {
       cur_regs.ebx = (long)tcp->childshm;            // location of base
       cur_regs.ecx = ((long)tcp->childshm) + offset; // location of new_argv
 #elif defined(X86_64)
-      cur_regs.rdi = (long)tcp->childshm;            // location of base
-      cur_regs.rsi = ((long)tcp->childshm) + offset; // location of new_argv
+      cur_regs.rdi = (long)tcp->childshm;
+      cur_regs.rsi = ((long)tcp->childshm) + offset;
 #else
   #error "Unknown architecture (not I386 or X86_64)"
 #endif
@@ -1382,11 +1400,7 @@ static void begin_setup_shmat(struct tcb* tcp) {
   cur_regs.edi = (long)NULL; /* We don't use shmat's shmaddr */
   cur_regs.ebp = 0; /* The "fifth" argument is unused. */
 #elif defined(X86_64)
-  // there is a direct shmat syscall in x86-64
-  //
-  // according to this page:
-  //   http://stackoverflow.com/questions/2535989/what-are-the-calling-conventions-for-unix-linux-system-calls-on-x86-64
-  // the first 3 syscall parameters are passed in %rdi, %rsi, %rdx
+  // there is a direct shmat syscall in x86-64!!!
   cur_regs.orig_rax = __NR_shmat;
   cur_regs.rdi = tcp->shmid;
   cur_regs.rsi = 0;
@@ -1425,7 +1439,7 @@ void finish_setup_shmat(struct tcb* tcp) {
   // there seems to be a direct shmat syscall in x86-64
   assert(cur_regs.orig_rax == __NR_shmat);
 
-  // the return value of the shmat syscall is in %rax
+  // the return value of the direct shmat syscall is in %rax
   tcp->childshm = (void*)cur_regs.rax;
 
   tcp->saved_regs.rax = tcp->saved_regs.orig_rax;
