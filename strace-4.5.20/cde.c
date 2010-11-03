@@ -1326,7 +1326,7 @@ void alloc_tcb_CDE_fields(struct tcb* tcp) {
 
     tcp->localshm = (char*)shmat(tcp->shmid, NULL, 0);
 
-    if ((int)tcp->localshm == -1) {
+    if ((long)tcp->localshm == -1) {
       perror("shmat");
       exit(1);
     }
