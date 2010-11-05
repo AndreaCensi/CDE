@@ -652,6 +652,49 @@ void CDE_begin_execve(struct tcb* tcp) {
   assert(!tcp->opened_filename);
   tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
 
+  // this seems like a really ugly hack, but I can't think of a way
+  // around it ... on some linux distros, /bin/bash sporadically
+  // crashes once in a blue moon if you attempt to run it through
+  // /lib/ld-linux.so.2 (but it works fine if you run it directly from
+  // the shell.  here is an example from Xubuntu 9.10 (32-bit)
+  /*
+
+$ while true; do /lib/ld-linux.so.2 /bin/bash -c "echo hello"; sleep 0.1; done > /dev/null
+Segmentation fault
+Segmentation fault
+Segmentation fault
+Segmentation fault
+/bin/bash: xmalloc: ../bash/variables.c:2150: cannot allocate 1187 bytes (0 bytes allocated)
+Segmentation fault
+Segmentation fault
+Segmentation fault
+Segmentation fault
+Segmentation fault
+Segmentation fault
+Segmentation fault
+Segmentation fault
+/bin/bash: xmalloc: ../bash/make_cmd.c:76: cannot allocate 240 bytes (0 bytes allocated)
+Segmentation fault
+[...]
+
+  */
+  // the command is simple enough: /lib/ld-linux.so.2 /bin/bash -c "echo hello"
+  // but when run enough times, it sporadically crashes
+  // (Google for "xmalloc /bin/bash cannot allocate" for some random
+  // forum posts about these mysterious crashes)
+  //
+  // note that if you just directly run:
+  //   /bin/bash -c "echo hello"
+  // repeatedly, there are NO segfaults.
+  //
+  // thus, don't try invoking the dynamic linker on /bin/bash
+  // (this doesn't seem to be CDE's fault, because it crashes even when
+  //  not running in CDE)
+  if (strcmp(tcp->opened_filename, "/bin/bash") == 0) {
+    return;
+  }
+
+
   // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
   // is a valid executable file ... otherwise don't do
   // anything and simply let the execve fail just like it's supposed to
