@@ -652,12 +652,12 @@ void CDE_begin_execve(struct tcb* tcp) {
   assert(!tcp->opened_filename);
   tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
 
-  // this seems like a really ugly hack, but I can't think of a way
-  // around it ... on some linux distros, /bin/bash sporadically
-  // crashes once in a blue moon if you attempt to run it through
-  // /lib/ld-linux.so.2 (but it works fine if you run it directly from
-  // the shell).  here is an example from Xubuntu 9.10 (32-bit)
-  /*
+
+  /* This seems like a really ugly hack, but I can't think of a way
+     around it ... on some linux distros, /bin/bash sporadically crashes
+     once in a blue moon if you attempt to run it through
+     /lib/ld-linux.so.2 (but it works fine if you run it directly from
+     the shell).  here is an example from Xubuntu 9.10 (32-bit)
 
 $ while true; do /lib/ld-linux.so.2 /bin/bash -c "echo hello"; sleep 0.1; done > /dev/null
 Segmentation fault
@@ -677,21 +677,48 @@ Segmentation fault
 Segmentation fault
 [...]
 
+the command is simple enough: /lib/ld-linux.so.2 /bin/bash -c "echo hello"
+but when run enough times, it sporadically crashes
+
+Google for "xmalloc /bin/bash cannot allocate" for some random
+forum posts about these mysterious crashes
+e.g., http://lists.debian.org/debian-glibc/2004/09/msg00149.html
+
+note that if you just directly run:
+  /bin/bash -c "echo hello"
+repeatedly, there are NO segfaults.
+  
+
+thus, don't try invoking the dynamic linker on /bin/bash (this doesn't
+seem to be CDE's fault, because it crashes even when not running in CDE)
+ 
+
+Update on 2010-11-05:
+
+A more direct way this problem manifests is if you run 'make' with this as the Makefile:
+
+'''
+all:
+        /lib64/ld-linux-x86-64.so.2 /bin/bash -c "echo hello"
+'''
+
+HA, it seems like someone reported this as a bug in Ubuntu:
+
+  http://www.mail-archive.com/ubuntu-bugs@lists.ubuntu.com/msg925663.html
+  https://bugs.launchpad.net/ubuntu/+source/make/+bug/249872
+
+Related bug report that hones in on /bin/bash itself:
+  https://bugs.launchpad.net/ubuntu/+source/bash/+bug/452175
+
+test case:
+
+#!/bin/sh
+while true
+do
+   /lib/ld-linux.so.2 /bin/bash /usr/bin/which apt-get
+done
+
   */
-  // the command is simple enough: /lib/ld-linux.so.2 /bin/bash -c "echo hello"
-  // but when run enough times, it sporadically crashes
-  //
-  // Google for "xmalloc /bin/bash cannot allocate" for some random
-  // forum posts about these mysterious crashes
-  // e.g., http://lists.debian.org/debian-glibc/2004/09/msg00149.html
-  //
-  // note that if you just directly run:
-  //   /bin/bash -c "echo hello"
-  // repeatedly, there are NO segfaults.
-  //
-  // thus, don't try invoking the dynamic linker on /bin/bash
-  // (this doesn't seem to be CDE's fault, because it crashes even when
-  //  not running in CDE)
   if (strcmp(tcp->opened_filename, "/bin/bash") == 0) {
     return;
   }
