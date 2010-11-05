@@ -5,7 +5,7 @@ from cde_test_common import *
 
 # customize this test due to special circumstances
 
-CDE_EXEC_SPECIAL = "/home/pgbovine/CDE/strace-4.5.20/cde-exec"
+CDE_EXEC_SPECIAL = "/home/pgbovine/CDE/cde-exec"
 
 os.system('rm -rf cde-root')
 time.sleep(0.3) # to give os.system some time to work :)

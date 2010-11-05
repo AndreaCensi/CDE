@@ -2,7 +2,7 @@
 import os, time
 from subprocess import *
 
-CDE_BIN = "/home/pgbovine/CDE/strace-4.5.20/cde"
+CDE_BIN = "/home/pgbovine/CDE/cde"
 CDE_EXEC = "./cde-exec"
 
 # careful!!!
