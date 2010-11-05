@@ -603,7 +603,7 @@ void CDE_begin_execve(struct tcb* tcp) {
   // around it ... on some linux distros, /bin/bash sporadically
   // crashes once in a blue moon if you attempt to run it through
   // /lib/ld-linux.so.2 (but it works fine if you run it directly from
-  // the shell.  here is an example from Xubuntu 9.10 (32-bit)
+  // the shell).  here is an example from Xubuntu 9.10 (32-bit)
   /*
 
 $ while true; do /lib/ld-linux.so.2 /bin/bash -c "echo hello"; sleep 0.1; done > /dev/null
@@ -627,8 +627,10 @@ Segmentation fault
   */
   // the command is simple enough: /lib/ld-linux.so.2 /bin/bash -c "echo hello"
   // but when run enough times, it sporadically crashes
-  // (Google for "xmalloc /bin/bash cannot allocate" for some random
-  // forum posts about these mysterious crashes)
+  //
+  // Google for "xmalloc /bin/bash cannot allocate" for some random
+  // forum posts about these mysterious crashes
+  // e.g., http://lists.debian.org/debian-glibc/2004/09/msg00149.html
   //
   // note that if you just directly run:
   //   /bin/bash -c "echo hello"
