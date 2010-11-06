@@ -520,10 +520,10 @@ startup_child (char **argv)
 
   // pgbovine - muck with selected environment variables depending on CDE_exec_mode
   if (CDE_exec_mode) {
-    // load environment variables from "cde-root/cde.environment" file
-    FILE* envF = fopen(CDE_ROOT "/cde.environment", "r");
+    // load environment variables from "$CDE_PACKAGE_DIR/cde.environment" file
+    FILE* envF = fopen(CDE_PACKAGE_DIR "/cde.environment", "r");
     if (!envF) {
-      perror(CDE_ROOT "/cde.environment");
+      perror(CDE_PACKAGE_DIR "/cde.environment");
       cleanup();
       exit(1);
     }
@@ -586,11 +586,14 @@ startup_child (char **argv)
     free(line);
   }
   else {
-    // save current value of selected environment vars to "cde-root/cde.environment" file
-    mkdir(CDE_ROOT, 0777);
-    FILE* envF = fopen(CDE_ROOT "/cde.environment", "w");
+    mkdir(CDE_PACKAGE_DIR, 0777);
+    mkdir(CDE_ROOT_DIR, 0777);
+
+    // save current value of selected environment vars to
+    // "$CDE_PACKAGE_DIR/cde.environment" file
+    FILE* envF = fopen(CDE_PACKAGE_DIR "/cde.environment", "w");
     if (!envF) {
-      perror(CDE_ROOT "/cde.environment");
+      perror(CDE_PACKAGE_DIR "/cde.environment");
       cleanup();
       exit(1);
     }
@@ -847,51 +850,22 @@ main(int argc, char *argv[])
   // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
-
-    // sanity check
-    struct stat st;
-    if (stat(CDE_ROOT, &st) != 0 || !S_ISDIR(st.st_mode)) {
-      fprintf(stderr, "cde-exec error: " CDE_ROOT "/ sub-directory does not exist\n");
-      exit(1);
-    }
-
-    // initialize orig_run_cde_starting_pwd from cde-root/cde_starting_pwd.txt
-    FILE* f = fopen(CDE_ROOT "/cde_starting_pwd.txt", "r");
-    if (!f) {
-      fprintf(stderr, "cde-exec error: " CDE_ROOT "/cde_starting_pwd.txt does not exist\n");
-      exit(1);
-    }
-    char* line = NULL;
-    size_t len = 0;
-    ssize_t read;
-    read = getline(&line, &len, f);
-
-    strcpy(orig_run_cde_starting_pwd, line);
-
-    free(line);
-    fclose(f);
   }
   else {
     CDE_exec_mode = 0;
 
-    // pgbovine - copy 'cde' executable to pwd and rename it 'cde-exec',
-    // so that it can be included in the executable
-    copy_file(argv[0], "cde-exec");
+    mkdir(CDE_PACKAGE_DIR, 0777);
+    mkdir(CDE_ROOT_DIR, 0777);
 
-    mkdir(CDE_ROOT, 0777);
+    // pgbovine - copy 'cde' executable to $CDE_PACKAGE_DIR and rename
+    // it 'cde-exec', so that it can be included in the executable
+    copy_file(argv[0], CDE_PACKAGE_DIR "/cde-exec");
 
-    // save cde_starting_pwd into a file as well
-    FILE* f = fopen(CDE_ROOT "/cde_starting_pwd.txt", "w");
-    if (f) {
-      fprintf(f, "%s", cde_starting_pwd);
-      fclose(f);
-    }
-
-    // pgbovine - append the command line to cde.log in pwd, so that the
+    // pgbovine - append the command line to cde.log, so that the
     // user on the other end knows exactly how to run the command
-    FILE* log = fopen("cde.log", "a");
+    FILE* log = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
     if (log) {
-      fprintf(log, "./cde-exec");
+      fprintf(log, "cde-exec");
       int i;
       for (i = 1; i < argc; i++) {
         fprintf(log, " ");

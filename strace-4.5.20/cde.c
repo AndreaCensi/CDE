@@ -51,7 +51,7 @@ extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
 extern char* find_ELF_program_interpreter(char * file_name); // from ../readelf-mini/libreadelf-mini.a
 
-// prepend "cde-root" to the given path string, assumes that the string
+// prepend $CDE_ROOT_DIR to the given path string, assumes that the string
 // starts with '/' (i.e., it's an absolute path)
 //
 // warning - this returns a relative path
@@ -59,7 +59,7 @@ extern char* find_ELF_program_interpreter(char * file_name); // from ../readelf-
 char* prepend_cderoot(char* path) {
   assert(IS_ABSPATH(path));
   char* ret = malloc(CDE_ROOT_LEN + strlen(path) + 1);
-  strcpy(ret, CDE_ROOT);
+  strcpy(ret, CDE_ROOT_DIR);
   strcat(ret, path);
   return ret;
 }
@@ -1099,44 +1099,6 @@ void CDE_end_execve(struct tcb* tcp) {
 }
 
 
-/* spoofing uname leads to mysterious weird results like remote X11
-   displays not working (I think .Xauthority relies on an accurate uname)
-   so let's not spoof uname for now
-
-#include <sys/utsname.h>
-
-void CDE_end_uname(struct tcb* tcp) {
-  struct utsname uname;
-
-  if (CDE_exec_mode) {
-    // if cde-root/cde.uname exists, read cached copy and override
-    // return value with it; otherwise don't do anything
-    int inF = open(CDE_ROOT "/cde.uname", O_RDONLY);
-    if (inF >= 0) {
-      read(inF, &uname, sizeof(uname));
-      close(inF);
-
-      //printf("saved uname.release='%s'\n", uname.release);
-      //strcpy(uname.release, "ooga booga"); // for testing :)
-      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], (char*)&uname, sizeof uname);
-    }
-  }
-  else {
-    EXITIF(umove(tcp, tcp->u_arg[0], &uname) < 0);
-    //printf("uname.release='%s'\n", uname.release);
-
-    // serialize the bytes of uname LITERALLY to cde-root/cde.uname
-    // (overriding previous contents).  we don't have to care about big
-    // vs. little endian since CDE isn't portably across CPU
-    // architectures anyways ;)
-    int outF = open(CDE_ROOT "/cde.uname", O_WRONLY | O_CREAT, 0777);
-    write(outF, &uname, sizeof(uname));
-    close(outF);
-  }
-}
-*/
-
-
 void CDE_begin_file_unlink(struct tcb* tcp) {
   assert(!tcp->opened_filename);
   tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
@@ -1685,8 +1647,8 @@ void CDE_create_path_symlink_dirs() {
 }
 
 
-// create a matching symlink for filename within CDE_ROOT
-// and copy over the symlink's target into CDE_ROOT as well
+// create a matching symlink for filename within CDE_ROOT_DIR
+// and copy over the symlink's target into CDE_ROOT_DIR as well
 // Pre-req: f must be an absolute path to a symlink
 static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
                                        char is_regular_file) {

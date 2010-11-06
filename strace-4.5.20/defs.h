@@ -377,8 +377,11 @@ struct tcb {
 };
 
 // pgbovine
-#define CDE_ROOT "cde-root"
-#define CDE_ROOT_LEN 8
+#define CDE_PACKAGE_DIR "cde-package"
+#define CDE_PACKAGE_LEN 11
+
+#define CDE_ROOT_DIR (CDE_PACKAGE_DIR "/cde-root")
+#define CDE_ROOT_LEN (CDE_PACKAGE_LEN + 9)
 
 /* TCB flags */
 #define TCB_STARTUP	00001	/* We have just begun ptracing this process */
