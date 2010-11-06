@@ -678,6 +678,7 @@ startup_child (char **argv)
       else {
         strcpy(path_to_search, pathname);
       }
+      //printf("path_to_search = '%s'\n", path_to_search);
 
 			if (stat(path_to_search, &statbuf) == 0 &&
 			    /* Accept only regular files

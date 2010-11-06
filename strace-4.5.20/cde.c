@@ -72,23 +72,30 @@ char* prepend_cderoot(char* path) {
   return ret;
 }
 
-// calls prepend_cderoot and then resolves it relative to
-// cde_starting_pwd, to create an ABSOLUTE path within cde-root/
-// mallocs a new string!
-//
-// Pre-req: path must be an absolute path!
+// WARNING: this function behaves differently depending on value of CDE_exec_mode
 char* create_abspath_within_cderoot(char* path) {
-  char* relpath_within_cde_root = prepend_cderoot(path);
+  assert(IS_ABSPATH(path)); // Pre-req: path must be an absolute path!
 
-  // really really tricky ;)  if the child process has changed
-  // directories, then we can't rely on relpath_within_cde_root to
-  // exist.  instead, we must create an ABSOLUTE path based on
-  // cde_starting_pwd, which is the directory where cde-exec was first launched!
-  char* ret = canonicalize_relpath(relpath_within_cde_root, cde_starting_pwd);
-  free(relpath_within_cde_root);
+  if (CDE_exec_mode) {
+    // if we're making a cde-exec run, then simply re-route it
+    // inside of cde_pseudo_root_dir
+    return format("%s%s", cde_pseudo_root_dir, path);
+  }
+  else {
+    // if we're making an ORIGINAL (tracing) run, then simply prepend
+    // CDE_ROOT_DIR to path and canonicalize it
+    char* relpath_within_cde_root = prepend_cderoot(path);
 
-  assert(IS_ABSPATH(ret));
-  return ret;
+    // really really tricky ;)  if the child process has changed
+    // directories, then we can't rely on relpath_within_cde_root to
+    // exist.  instead, we must create an ABSOLUTE path based on
+    // cde_starting_pwd, which is the directory where cde-exec was first launched!
+    char* ret = canonicalize_relpath(relpath_within_cde_root, cde_starting_pwd);
+    free(relpath_within_cde_root);
+
+    assert(IS_ABSPATH(ret));
+    return ret;
+  }
 }
 
 
