@@ -15,6 +15,7 @@
 
 */
 
+#include "config.h" // to get I386 / X86_64 definitions
 #include "cde.h"
 #include "paths.h"
 
@@ -1535,8 +1536,15 @@ void CDE_end_getcwd(struct tcb* tcp) {
                      cde_pseudo_root_dir_len) == 0);
 
       char* fake_cwd = (tcp->current_dir + cde_pseudo_root_dir_len);
+      int fake_cwd_len = strlen(fake_cwd);
 
-      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], fake_cwd, strlen(fake_cwd) + 1);
+      // special case for '/' directory:
+      if (fake_cwd_len == 0) {
+        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], "/", 2);
+      }
+      else {
+        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], fake_cwd, fake_cwd_len + 1);
+      }
 
       // for debugging
       //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
@@ -1783,5 +1791,47 @@ void CDE_init_pseudo_root_dir() {
   free(tmp);
 
   delete_path(p);
+}
+
+// create a '.cde' version of argv[1] inside the corresponding
+// location of cde_starting_pwd within CDE_ROOT_DIR, which is a
+// shell script that invokes it using cde-exec
+void CDE_create_convenience_script_within_pwd(char* target_program_fullpath) {
+  // only take the basename to construct cde_script_name,
+  // since target_program_fullpath could be a relative path like '../python'
+  char* cde_script_name = format("%s.cde", basename(target_program_fullpath));
+  char* progname_redirected =
+    redirect_filename_into_cderoot(cde_script_name, cde_starting_pwd);
+
+  mkdir_recursive(progname_redirected, 1); // make sure directory exists :)
+
+
+  // this is sort of tricky.  we need to insert in a bunch of ../ so
+  // that we can find cde-exec, which is right in the cde-package directory
+  struct path* p = new_path_from_abspath(cde_starting_pwd);
+  char dot_dots[MAXPATHLEN];
+  if (p->depth > 0) {
+    strcpy(dot_dots, "..");
+    int i;
+    for (i = 1; i <= p->depth; i++) {
+      strcat(dot_dots, "/..");
+    }
+  }
+  else {
+    strcpy(dot_dots, "."); // simply use '.' if there are no nesting layers
+  }
+  delete_path(p);
+
+  FILE* f = fopen(progname_redirected, "w"); // open in binary mode
+
+  fprintf(f, "#!/bin/sh\n");
+  fprintf(f, "%s/cde-exec %s $@\n", dot_dots, target_program_fullpath);
+
+  fclose(f);
+
+  chmod(progname_redirected, 0777); // now make the script executable
+
+  free(progname_redirected);
+  free(cde_script_name);
 }
 

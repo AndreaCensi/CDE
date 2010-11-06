@@ -97,6 +97,7 @@ extern void strcpy_redirected_cderoot(char* dst, char* src);
 extern void CDE_create_path_symlink_dirs(void);
 extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern void CDE_init_pseudo_root_dir(void);
+extern void CDE_create_convenience_script_within_pwd(char* target_program_name);
 extern char cde_starting_pwd[MAXPATHLEN];
 extern char cde_pseudo_root_dir[MAXPATHLEN];
 
@@ -191,8 +192,7 @@ int exitval;
     fprintf(ofp,
             "CDE: automatic packaging of Code, Data, and Environment\n"
             "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n\n"
-            "usage: cde-exec <command within cde-root/ to run>\n"
-            "(see cde.log for possible commands within this CDE package)\n");
+            "usage: cde-exec <command within cde-root/ to run>\n");
   }
   else {
     fprintf(ofp,
@@ -853,6 +853,9 @@ main(int argc, char *argv[])
   // initialize this before doing anything else!
   getcwd(cde_starting_pwd, sizeof cde_starting_pwd);
 
+  // pgbovine - allow most slutty of permissions for new files/directories
+  umask(0000);
+
   // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
@@ -869,24 +872,8 @@ main(int argc, char *argv[])
     // it 'cde-exec', so that it can be included in the executable
     copy_file(argv[0], CDE_PACKAGE_DIR "/cde-exec");
 
-    // pgbovine - append the command line to cde.log, so that the
-    // user on the other end knows exactly how to run the command
-    FILE* log = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
-    if (log) {
-      fprintf(log, "cde-exec");
-      int i;
-      for (i = 1; i < argc; i++) {
-        fprintf(log, " ");
-        fprintf(log, argv[i]);
-      }
-      fprintf(log, "\n");
-      fclose(log);
-    }
+    CDE_create_convenience_script_within_pwd(argv[1]);
   }
-
-  // pgbovine - allow most slutty of permissions for new files/directories
-  umask(0000);
-
 
 	/* Allocate the initial tcbtab.  */
 	tcbtabsize = argc;	/* Surely enough for all -p args.  */

@@ -1,6 +1,7 @@
 // mini-library for manipulating file paths on UNIX-like systems
 // by Philip Guo
 
+#include "config.h" // to get I386 definition
 #include "paths.h"
 
 extern char CDE_exec_mode;
