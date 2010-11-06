@@ -1523,13 +1523,20 @@ void CDE_end_getcwd(struct tcb* tcp) {
       // 'pwd' program since pwd doesn't actually call getcwd() ... it
       // does its own funky-ass thing!
 
-      // TODO: spoof getcwd by only taking the part BELOW cde-root/
+      // spoof getcwd by only taking the part BELOW cde-root/
       // e.g., if tcp->current_dir is:
       //   /home/bob/cde-package/cde-root/home/alice/cool-experiment
       // then return:
       //   /home/alice/cool-experiment
       // as cwd
-      assert(0);
+      int cde_pseudo_root_dir_len = strlen(cde_pseudo_root_dir);
+      // sanity check, make sure tcp->current_dir is within/ cde_pseudo_root_dir
+      assert(strncmp(tcp->current_dir, cde_pseudo_root_dir,
+                     cde_pseudo_root_dir_len) == 0);
+
+      char* fake_cwd = (tcp->current_dir + cde_pseudo_root_dir_len);
+
+      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], fake_cwd, strlen(fake_cwd) + 1);
 
       // for debugging
       //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
