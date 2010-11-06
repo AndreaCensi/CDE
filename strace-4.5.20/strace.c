@@ -97,7 +97,7 @@ extern void strcpy_redirected_cderoot(char* dst, char* src);
 extern void CDE_create_path_symlink_dirs(void);
 extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern void CDE_init_pseudo_root_dir(void);
-extern void CDE_create_convenience_script_within_pwd(char* target_program_name);
+extern void CDE_create_convenience_scripts(char* target_program_name);
 extern char cde_starting_pwd[MAXPATHLEN];
 extern char cde_pseudo_root_dir[MAXPATHLEN];
 
@@ -872,7 +872,13 @@ main(int argc, char *argv[])
     // it 'cde-exec', so that it can be included in the executable
     copy_file(argv[0], CDE_PACKAGE_DIR "/cde-exec");
 
-    CDE_create_convenience_script_within_pwd(argv[1]);
+    CDE_create_convenience_scripts(argv[1]);
+
+    // make a text file called orig-run-pwd.txt that tells you how to get to the
+    // pwd from the original run
+    FILE* f = fopen(CDE_PACKAGE_DIR "/orig-run-pwd.txt", "w");
+    fprintf(f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
+    fclose(f);
   }
 
 	/* Allocate the initial tcbtab.  */

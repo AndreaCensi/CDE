@@ -1796,7 +1796,11 @@ void CDE_init_pseudo_root_dir() {
 // create a '.cde' version of argv[1] inside the corresponding
 // location of cde_starting_pwd within CDE_ROOT_DIR, which is a
 // shell script that invokes it using cde-exec
-void CDE_create_convenience_script_within_pwd(char* target_program_fullpath) {
+//
+// also, if target_program_fullpath is only a program name
+// (without any '/' chars in it, then also create a convenience script
+// at the top level of the package)
+void CDE_create_convenience_scripts(char* target_program_fullpath) {
   // only take the basename to construct cde_script_name,
   // since target_program_fullpath could be a relative path like '../python'
   char* cde_script_name = format("%s.cde", basename(target_program_fullpath));
@@ -1810,28 +1814,33 @@ void CDE_create_convenience_script_within_pwd(char* target_program_fullpath) {
   // that we can find cde-exec, which is right in the cde-package directory
   struct path* p = new_path_from_abspath(cde_starting_pwd);
   char dot_dots[MAXPATHLEN];
-  if (p->depth > 0) {
-    strcpy(dot_dots, "..");
-    int i;
-    for (i = 1; i <= p->depth; i++) {
-      strcat(dot_dots, "/..");
-    }
-  }
-  else {
-    strcpy(dot_dots, "."); // simply use '.' if there are no nesting layers
+  assert(p->depth > 0);
+  strcpy(dot_dots, "..");
+  int i;
+  for (i = 1; i <= p->depth; i++) {
+    strcat(dot_dots, "/..");
   }
   delete_path(p);
 
-  FILE* f = fopen(progname_redirected, "w"); // open in binary mode
-
+  FILE* f = fopen(progname_redirected, "w");
   fprintf(f, "#!/bin/sh\n");
   fprintf(f, "%s/cde-exec %s $@\n", dot_dots, target_program_fullpath);
-
   fclose(f);
 
   chmod(progname_redirected, 0777); // now make the script executable
 
   free(progname_redirected);
+
+  if (!strchr(target_program_fullpath, '/')) {
+    char* toplevel_script_name = format("%s/%s", CDE_PACKAGE_DIR, cde_script_name);
+    FILE* f = fopen(toplevel_script_name, "w");
+    fprintf(f, "#!/bin/sh\n");
+    fprintf(f, "cd cde-root && ../cde-exec %s $@\n", target_program_fullpath);
+    fclose(f);
+    chmod(toplevel_script_name, 0777); // now make the script executable
+    free(toplevel_script_name);
+  }
+
   free(cde_script_name);
 }
 
