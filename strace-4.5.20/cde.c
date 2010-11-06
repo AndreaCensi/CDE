@@ -15,14 +15,16 @@
 
 */
 
-#include "config.h" // to get I386 / X86_64 definitions
 #include "cde.h"
 #include "paths.h"
 
+
 // TODO: eliminate this hack if it results in a compile-time error
+#include "config.h" // to get I386 / X86_64 definitions
 #if defined (I386)
 __asm__(".symver shmctl,shmctl@GLIBC_2.0"); // hack to eliminate glibc 2.2 dependency
 #endif
+
 
 // 1 if we are executing code in a CDE package,
 // 0 for tracing regular execution

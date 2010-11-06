@@ -9,3 +9,6 @@ all: strace-4.5.20/Makefile
 strace-4.5.20/Makefile:
 	cd strace-4.5.20 && ./configure
 
+clean:
+	cd strace-4.5.20 && make clean
+

@@ -865,6 +865,10 @@ main(int argc, char *argv[])
   else {
     CDE_exec_mode = 0;
 
+    if (argc < 2) {
+      usage(stdout, 0);
+    }
+
     mkdir(CDE_PACKAGE_DIR, 0777);
     mkdir(CDE_ROOT_DIR, 0777);
 
