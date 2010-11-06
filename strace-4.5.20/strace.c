@@ -98,6 +98,7 @@ extern void CDE_create_path_symlink_dirs(void);
 extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern void CDE_init_pseudo_root_dir(void);
 extern char cde_starting_pwd[MAXPATHLEN];
+extern char cde_pseudo_root_dir[MAXPATHLEN];
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -520,10 +521,13 @@ startup_child (char **argv)
 
   // pgbovine - muck with selected environment variables depending on CDE_exec_mode
   if (CDE_exec_mode) {
-    // load environment variables from "$CDE_PACKAGE_DIR/cde.environment" file
-    FILE* envF = fopen(CDE_PACKAGE_DIR "/cde.environment", "r");
+    // load environment variables from "$cde_pseudo_root_dir/../cde.environment" file
+    static char cde_environment_abspath[MAXPATHLEN];
+    strcpy(cde_environment_abspath, cde_pseudo_root_dir);
+    strcat(cde_environment_abspath, "/../cde.environment");
+    FILE* envF = fopen(cde_environment_abspath, "r");
     if (!envF) {
-      perror(CDE_PACKAGE_DIR "/cde.environment");
+      perror(cde_environment_abspath);
       cleanup();
       exit(1);
     }
