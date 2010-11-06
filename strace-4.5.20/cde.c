@@ -35,16 +35,24 @@ static char* strcpy_from_child(struct tcb* tcp, long addr);
 
 #define SHARED_PAGE_SIZE (MAXPATHLEN * 4)
 
-static char* redirect_filename(char* filename, char* child_current_pwd);
+static char* redirect_filename_into_cderoot(char* filename, char* child_current_pwd);
+static char* redirect_only_abspath_into_cderoot(char* filename);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
                                        char is_regular_file);
 
 // the true pwd of the cde executable AT THE START of execution
 char cde_starting_pwd[MAXPATHLEN];
-// if CDE_exec_mode is on, then this is the pwd of the cde exectuable at
-// the start of the ORIGINAL execution (could differ from cde_starting_pwd)
-char orig_run_cde_starting_pwd[MAXPATHLEN];
+
+// the absolute path to the cde-root/ directory, since that will be
+// where our fake filesystem starts. e.g., if cde_starting_pwd is
+//   /home/bob/cde-package/cde-root/home/alice/cool-experiment
+// then cde_pseudo_root_dir is:
+//   /home/bob/cde-package/cde-root
+//
+// only relevant when we're executing in CDE_exec_mode
+char cde_pseudo_root_dir[MAXPATHLEN];
+
 
 // to shut up gcc warnings without going thru #include hell
 extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
@@ -113,16 +121,6 @@ static int ignore_path(char* filename) {
   return 0;
 }
 
-// is the file within the ORIGINAL run's starting directory
-static int file_is_within_original_starting_pwd(char* filename, char* child_current_pwd) {
-  if (CDE_exec_mode) {
-    return file_is_within_dir(filename, orig_run_cde_starting_pwd, child_current_pwd);
-  }
-  else {
-    return file_is_within_dir(filename, cde_starting_pwd, child_current_pwd);
-  }
-}
-
 
 // cp $src_filename $dst_filename
 // note that this WILL follow symlinks
@@ -157,11 +155,6 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
 
   // don't copy filename that we're ignoring
   if (ignore_path(filename)) {
-    return;
-  }
-
-  // don't do anything for files inside of pwd :)
-  if (file_is_within_original_starting_pwd(filename, child_current_pwd)) {
     return;
   }
 
@@ -370,11 +363,7 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
   assert(CDE_exec_mode);
   assert(tcp->opened_filename);
 
-  // use orig_run_current_dir
-  char* redirected_filename =
-    redirect_filename(tcp->opened_filename, tcp->orig_run_current_dir);
-
-  // do nothing if redirect_filename returns NULL ...
+  char* redirected_filename = redirect_only_abspath_into_cderoot(tcp->opened_filename);
   if (!redirected_filename) {
     return;
   }
@@ -428,15 +417,13 @@ static void modify_syscall_two_args(struct tcb* tcp) {
   }
 
   char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
-  // use orig_run_current_dir
   char* redirected_filename1 =
-    redirect_filename(filename1, tcp->orig_run_current_dir);
+    redirect_only_abspath_into_cderoot(filename1);
   free(filename1);
 
   char* filename2 = strcpy_from_child(tcp, tcp->u_arg[1]);
-  // use orig_run_current_dir
   char* redirected_filename2 =
-    redirect_filename(filename2, tcp->orig_run_current_dir);
+    redirect_only_abspath_into_cderoot(filename2);
   free(filename2);
 
   // gotta do both, yuck
@@ -508,7 +495,10 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 
 // create a malloc'ed filename that contains a version within cde-root/
 // return NULL if the filename should NOT be redirected
-static char* redirect_filename(char* filename, char* child_current_pwd) {
+static char* redirect_filename_into_cderoot(char* filename, char* child_current_pwd) {
+  // only use this function when you're making the ORIGINAL (tracing) run
+  assert(!CDE_exec_mode);
+
   assert(filename);
   assert(child_current_pwd);
 
@@ -517,65 +507,36 @@ static char* redirect_filename(char* filename, char* child_current_pwd) {
     return NULL;
   }
 
-  if (file_is_within_original_starting_pwd(filename, child_current_pwd)) {
-    if (CDE_exec_mode) {
-      // tricky turkey!  child_current_pwd is actually the current dir
-      // from the ORIGINAL RUN (tcp->orig_run_current_dir), so if it's
-      // an absolute path, then turn it into a relative path by
-      // stripping off child_current_pwd from its prefix (make sure to
-      // return '.' when filename == child_current_pwd), so that it can
-      // be resolved relative to the current directory on the current
-      // machine.  e.g., for:
-      //
-      //   filename = "/home/pgbovine/test.txt"
-      //   child_current_pwd = "/home/pgbovine" (from ORIGINAL RUN)
-      //
-      // simply return "test.txt" so that no matter which machine or
-      // directory you're running in, you will access the right "test.txt"
-      if (IS_ABSPATH(filename)) {
-        struct path* file_p = new_path_from_abspath(filename);
-        struct path* base_p = new_path_from_abspath(child_current_pwd);
-
-        static char tmp_buf[MAXPATHLEN];
-        strcpy(tmp_buf, "."); // set this as the default value
-
-        assert(file_p->depth >= base_p->depth);
-        int i;
-        // sanity checks
-        for (i = 1; i <= base_p->depth; i++) {
-          assert(strcmp(get_path_component(file_p, i), get_path_component(base_p, i)) == 0);
-        }
-        for (i = base_p->depth + 1; i <= file_p->depth; i++) {
-          strcat(tmp_buf, "/");
-          strcat(tmp_buf, get_path_component(file_p, i));
-        }
-
-        delete_path(file_p);
-        delete_path(base_p);
-        return strdup(tmp_buf);
-      }
-      else {
-        return NULL;
-      }
-    }
-    else {
-      // if it's within pwd, then do NOT redirect it
-      return NULL;
-    }
-
-    assert(0); // should never reach here
-  }
-
   char* filename_abspath = canonicalize_path(filename, child_current_pwd);
-
-  // really really tricky ;)  if the child process has changed
-  // directories, then we can't rely on relpath_within_cde_root to
-  // exist.  instead, we must create an ABSOLUTE path based on
-  // cde_starting_pwd, which is the directory where cde-exec was first launched!
   char* ret = create_abspath_within_cderoot(filename_abspath);
   free(filename_abspath);
 
-  //printf("redirect_filename %s [%s] => %s\n", filename, child_current_pwd, ret);
+  //printf("redirect_filename_into_cderoot %s [%s] => %s\n", filename, child_current_pwd, ret);
+  return ret;
+}
+
+// create a malloc'ed filename that contains a version within cde-root/
+// ONLY if it's an absolute path, otherwise leave it alone.
+// return NULL if the filename should NOT be redirected
+static char* redirect_only_abspath_into_cderoot(char* filename) {
+  // only use this function when you're making the cde-exec run
+  assert(CDE_exec_mode);
+
+  assert(filename);
+  if (!IS_ABSPATH(filename)) {
+    return NULL;
+  }
+
+  // don't redirect certain special paths
+  if (ignore_path(filename)) {
+    return NULL;
+  }
+
+  char* filename_abspath = canonicalize_abspath(filename);
+  char* ret = create_abspath_within_cderoot(filename_abspath);
+  free(filename_abspath);
+
+  //printf("redirect_only_abspath_into_cderoot %s => %s\n", filename, ret);
   return ret;
 }
 
@@ -733,9 +694,7 @@ done
 
   char* redirected_path = NULL;
   if (CDE_exec_mode) {
-    // use orig_run_current_dir
-    redirected_path =
-      redirect_filename(tcp->opened_filename, tcp->orig_run_current_dir);
+    redirected_path = redirect_only_abspath_into_cderoot(tcp->opened_filename);
   }
 
   char* path_to_executable = NULL;
@@ -1108,7 +1067,8 @@ void CDE_begin_file_unlink(struct tcb* tcp) {
     modify_syscall_first_arg(tcp);
   }
   else {
-    char* redirected_path = redirect_filename(tcp->opened_filename, tcp->current_dir);
+    char* redirected_path =
+      redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
     if (redirected_path) {
       unlink(redirected_path);
       free(redirected_path);
@@ -1135,12 +1095,14 @@ void CDE_end_file_link(struct tcb* tcp) {
   else {
     if (tcp->u_rval == 0) {
       char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
-      char* redirected_filename1 = redirect_filename(filename1, tcp->current_dir);
+      char* redirected_filename1 =
+        redirect_filename_into_cderoot(filename1, tcp->current_dir);
       // first copy the origin file into cde-root/ before trying to link it
       copy_file_into_cde_root(filename1, tcp->current_dir);
 
       char* filename2 = strcpy_from_child(tcp, tcp->u_arg[1]);
-      char* redirected_filename2 = redirect_filename(filename2, tcp->current_dir);
+      char* redirected_filename2 =
+        redirect_filename_into_cderoot(filename2, tcp->current_dir);
 
       link(redirected_filename1, redirected_filename2);
 
@@ -1167,7 +1129,8 @@ void CDE_end_file_symlink(struct tcb* tcp) {
     if (tcp->u_rval == 0) {
       char* oldname = strcpy_from_child(tcp, tcp->u_arg[0]);
       char* newname = strcpy_from_child(tcp, tcp->u_arg[1]);
-      char* newname_redirected = redirect_filename(newname, tcp->current_dir);
+      char* newname_redirected =
+        redirect_filename_into_cderoot(newname, tcp->current_dir);
 
       symlink(oldname, newname_redirected);
 
@@ -1192,7 +1155,8 @@ void CDE_end_file_rename(struct tcb* tcp) {
   else {
     if (tcp->u_rval == 0) {
       char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
-      char* redirected_filename1 = redirect_filename(filename1, tcp->current_dir);
+      char* redirected_filename1 =
+        redirect_filename_into_cderoot(filename1, tcp->current_dir);
       free(filename1);
       // remove original file from cde-root/
       if (redirected_filename1) {
@@ -1217,21 +1181,15 @@ void CDE_end_chdir(struct tcb* tcp) {
 
   // only do this on success
   if (tcp->u_rval == 0) {
-    // update current_dir and orig_run_current_dir
+    // update current_dir
     char* tmp = canonicalize_path(tcp->opened_filename, tcp->current_dir);
     strcpy(tcp->current_dir, tmp);
     free(tmp);
 
-    if (CDE_exec_mode) {
-      tmp = canonicalize_path(tcp->opened_filename, tcp->orig_run_current_dir);
-      strcpy(tcp->orig_run_current_dir, tmp);
-      free(tmp);
-    }
-
-
     // now copy into cde-root/ if necessary
     if (!CDE_exec_mode) {
-      char* redirected_path = redirect_filename(tcp->opened_filename, tcp->current_dir);
+      char* redirected_path =
+        redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
       if (redirected_path) {
         mkdir_recursive(redirected_path, 0);
         free(redirected_path);
@@ -1256,7 +1214,8 @@ void CDE_end_mkdir(struct tcb* tcp) {
   else {
     // always mkdir even if the call fails
     // (e.g., because the directory already exists)
-    char* redirected_path = redirect_filename(tcp->opened_filename, tcp->current_dir);
+    char* redirected_path =
+      redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
     if (redirected_path) {
       mkdir_recursive(redirected_path, 0);
       free(redirected_path);
@@ -1279,7 +1238,8 @@ void CDE_end_rmdir(struct tcb* tcp) {
   }
   else {
     if (tcp->u_rval == 0) {
-      char* redirected_path = redirect_filename(tcp->opened_filename, tcp->current_dir);
+      char* redirected_path =
+        redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
       if (redirected_path) {
         rmdir(redirected_path);
         free(redirected_path);
@@ -1374,7 +1334,6 @@ void alloc_tcb_CDE_fields(struct tcb* tcp) {
   }
 
   tcp->current_dir = NULL;
-  tcp->orig_run_current_dir = NULL;
 }
 
 void free_tcb_CDE_fields(struct tcb* tcp) {
@@ -1390,11 +1349,6 @@ void free_tcb_CDE_fields(struct tcb* tcp) {
     free(tcp->current_dir);
     tcp->current_dir = NULL;
   }
-  if (tcp->orig_run_current_dir) {
-    free(tcp->orig_run_current_dir);
-    tcp->orig_run_current_dir = NULL;
-  }
-
 }
 
 
@@ -1494,12 +1448,11 @@ void finish_setup_shmat(struct tcb* tcp) {
 
 
 // copy src into dst, redirecting it into cde-root/ if necessary
-// (computed relative to orig_run_cde_starting_pwd!!!)
 //
 // dst should be big enough to hold a full path
 void strcpy_redirected_cderoot(char* dst, char* src) {
   assert(CDE_exec_mode);
-  char* redirected_src = redirect_filename(src, orig_run_cde_starting_pwd);
+  char* redirected_src = redirect_only_abspath_into_cderoot(src);
   if (redirected_src) {
     strcpy(dst, redirected_src);
     free(redirected_src);
@@ -1563,11 +1516,13 @@ void CDE_end_getcwd(struct tcb* tcp) {
       // 'pwd' program since pwd doesn't actually call getcwd() ... it
       // does its own funky-ass thing!
 
-      assert(tcp->orig_run_current_dir);
-      // spoof it!
-      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0],
-                      (char*)tcp->orig_run_current_dir,
-                      strlen(tcp->orig_run_current_dir) + 1);
+      // TODO: spoof getcwd by only taking the part BELOW cde-root/
+      // e.g., if tcp->current_dir is:
+      //   /home/bob/cde-package/cde-root/home/alice/cool-experiment
+      // then return:
+      //   /home/alice/cool-experiment
+      // as cwd
+      assert(0);
 
       // for debugging
       //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
@@ -1762,34 +1717,57 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
   assert(!tcp->current_dir);
   tcp->current_dir = malloc(MAXPATHLEN); // big boy!
 
-  if (CDE_exec_mode) {
-    assert(!tcp->orig_run_current_dir);
-    tcp->orig_run_current_dir = malloc(MAXPATHLEN); // big boy!
-  }
-
-
   // if parent exists, then its fields MUST be legit, so grab them
   if (tcp->parent) {
     assert(tcp->parent->current_dir);
     strcpy(tcp->current_dir, tcp->parent->current_dir);
     //printf("inherited %s [%d]\n", tcp->current_dir, tcp->pid);
-
-    if (CDE_exec_mode) {
-      assert(tcp->parent->orig_run_current_dir);
-      strcpy(tcp->orig_run_current_dir, tcp->parent->orig_run_current_dir);
-      //printf("  > inherited %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
-    }
   }
   else {
     // otherwise create fresh fields derived from master (cde) process
     getcwd(tcp->current_dir, MAXPATHLEN);
     //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
+  }
+}
 
-    if (CDE_exec_mode) {
-      // this might not be perfect, but it's the best we can do for now ...
-      strcpy(tcp->orig_run_current_dir, orig_run_cde_starting_pwd);
-      //printf("  > fresh %s [%d]\n", tcp->orig_run_current_dir, tcp->pid);
+// find the absolute path to the cde-root/ directory, since that
+// will be where our fake filesystem starts.  e.g., if our real pwd is:
+//   /home/bob/cde-package/cde-root/home/alice/cool-experiment
+// then the pseudo_root_dir is:
+//   /home/bob/cde-package/cde-root
+void CDE_init_pseudo_root_dir() {
+  assert(CDE_exec_mode);
+
+  struct path* p = new_path_from_abspath(cde_starting_pwd);
+  assert(p->depth > 0);
+  int i;
+  int found_index = -1;
+  for (i = 1; i <= p->depth; i++) {
+    char* component = get_path_component(p, i);
+    if (strcmp(component, CDE_ROOT_NAME) == 0) {
+      // flag an error if there is more than one cde-root directory, since
+      // we don't support NESTED cde packages o.O
+      if (found_index >= 0) {
+        fprintf(stderr, "Error: More than one cde-root/ directory found in pwd:\n  '%s'\n",
+                cde_starting_pwd);
+        exit(1);
+      }
+
+      found_index = i;
+      // keep searching in case there are duplicates, in which case the
+      // above assertion will fail
     }
   }
+
+  if (found_index < 0) {
+    fprintf(stderr, "Error: cde-exec must be run within a cde-root/ directory\n");
+    exit(1);
+  }
+
+  char* tmp = path2str(p, found_index);
+  strcpy(cde_pseudo_root_dir, tmp);
+  free(tmp);
+
+  delete_path(p);
 }
 

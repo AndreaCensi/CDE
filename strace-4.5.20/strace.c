@@ -96,8 +96,8 @@ extern void copy_file(char* src_filename, char* dst_filename);
 extern void strcpy_redirected_cderoot(char* dst, char* src);
 extern void CDE_create_path_symlink_dirs(void);
 extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
+extern void CDE_init_pseudo_root_dir(void);
 extern char cde_starting_pwd[MAXPATHLEN];
-extern char orig_run_cde_starting_pwd[MAXPATHLEN];
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -845,11 +845,14 @@ main(int argc, char *argv[])
   }
 	progname = argv[0];
 
+  // initialize this before doing anything else!
   getcwd(cde_starting_pwd, sizeof cde_starting_pwd);
 
   // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
+
+    CDE_init_pseudo_root_dir(); 
   }
   else {
     CDE_exec_mode = 0;
