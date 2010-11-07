@@ -1237,7 +1237,7 @@ void CDE_end_fchdir(struct tcb* tcp) {
 
       // we're assuming that fd_symlink_name exists and points to a real file
       char* new_dirname = readlink_strdup(fd_symlink_name);
-      printf("CDE_end_fchdir: %s (%d)\n", new_dirname, dir_fd);
+      //printf("CDE_end_fchdir: %s (%d)\n", new_dirname, dir_fd);
 
       // update current_dir
       char* tmp = canonicalize_path(new_dirname, tcp->current_dir);
