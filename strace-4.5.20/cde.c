@@ -35,11 +35,11 @@ static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename, char* child_current_pwd);
 
 static char* strcpy_from_child(struct tcb* tcp, long addr);
+static int ignore_path(char* filename);
 
 #define SHARED_PAGE_SIZE (MAXPATHLEN * 4)
 
 static char* redirect_filename_into_cderoot(char* filename, char* child_current_pwd);
-static char* redirect_only_abspath_into_cderoot(char* filename);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
 static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
                                        char is_regular_file);
@@ -76,6 +76,19 @@ static char* extract_sandboxed_pwd(char* real_pwd) {
   //   /home/alice/cool-experiment
   // as cwd
   int cde_pseudo_root_dir_len = strlen(cde_pseudo_root_dir);
+
+  // if real_pwd is within a strange directory like '/tmp' that should
+  // be ignored, AND if it resides outside of cde_pseudo_root_dir, then
+  // simply return itself
+  //
+  // e.g., if real_pwd is '/tmp', then return itself,
+  // but if real_pwd is '/tmp/cde-package/cde-root/home/pgbovine', then
+  // treat it like any normal path
+  if (ignore_path(real_pwd) &&
+      (strlen(real_pwd) < cde_pseudo_root_dir_len)) {
+    return real_pwd;
+  }
+
   // sanity check, make sure real_pwd is within/ cde_pseudo_root_dir
   assert(strncmp(real_pwd, cde_pseudo_root_dir, cde_pseudo_root_dir_len) == 0);
 
@@ -402,7 +415,8 @@ static void modify_syscall_first_arg(struct tcb* tcp) {
   assert(CDE_exec_mode);
   assert(tcp->opened_filename);
 
-  char* redirected_filename = redirect_only_abspath_into_cderoot(tcp->opened_filename);
+  char* redirected_filename =
+    redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
   if (!redirected_filename) {
     return;
   }
@@ -457,12 +471,12 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 
   char* filename1 = strcpy_from_child(tcp, tcp->u_arg[0]);
   char* redirected_filename1 =
-    redirect_only_abspath_into_cderoot(filename1);
+    redirect_filename_into_cderoot(filename1, tcp->current_dir);
   free(filename1);
 
   char* filename2 = strcpy_from_child(tcp, tcp->u_arg[1]);
   char* redirected_filename2 =
-    redirect_only_abspath_into_cderoot(filename2);
+    redirect_filename_into_cderoot(filename2, tcp->current_dir);
   free(filename2);
 
   // gotta do both, yuck
@@ -534,10 +548,8 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 
 // create a malloc'ed filename that contains a version within cde-root/
 // return NULL if the filename should NOT be redirected
+// WARNING: behavior differs based on CDE_exec_mode!
 static char* redirect_filename_into_cderoot(char* filename, char* child_current_pwd) {
-  // only use this function when you're making the ORIGINAL (tracing) run
-  assert(!CDE_exec_mode);
-
   assert(filename);
   assert(child_current_pwd);
 
@@ -546,45 +558,34 @@ static char* redirect_filename_into_cderoot(char* filename, char* child_current_
     return NULL;
   }
 
-  char* filename_abspath = canonicalize_path(filename, child_current_pwd);
+  char* filename_abspath = NULL;
+  if (CDE_exec_mode) {
+    // canonicalize_path has the desirable side effect of preventing
+    // 'malicious' paths from going below the pseudo-root '/' ... e.g.,
+    // if filename is '/home/pgbovine/../../../../'
+    // then filename_abspath is simply '/'
+    //
+    // we resolve relative paths w.r.t.
+    // extract_sandboxed_pwd(child_current_pwd), so that programs
+    // can't use relative paths like '../../../' to get out of sandbox
+    //
+    // this is why it's VERY IMPORTANT to canonicalize before creating a
+    // path into CDE_ROOT_DIR, so that absolute paths can't 'escape'
+    // the sandbox
+    filename_abspath =
+      canonicalize_path(filename, extract_sandboxed_pwd(child_current_pwd));
+  }
+  else {
+    filename_abspath = canonicalize_path(filename, child_current_pwd);
+  }
+  assert(filename_abspath);
+
+  // WARNING: behavior of create_abspath_within_cderoot
+  // differs based on CDE_exec_mode!
   char* ret = create_abspath_within_cderoot(filename_abspath);
   free(filename_abspath);
 
   //printf("redirect_filename_into_cderoot %s [%s] => %s\n", filename, child_current_pwd, ret);
-  return ret;
-}
-
-// create a malloc'ed filename that contains a version within cde-root/
-// ONLY if it's an absolute path, otherwise leave it alone.
-// return NULL if the filename should NOT be redirected
-static char* redirect_only_abspath_into_cderoot(char* filename) {
-  // only use this function when you're making the cde-exec run
-  assert(CDE_exec_mode);
-
-  assert(filename);
-  if (!IS_ABSPATH(filename)) {
-    printf("redirect_only_abspath_into_cderoot (relpath): '%s'\n", filename);
-    return NULL;
-  }
-
-  // don't redirect certain special paths
-  if (ignore_path(filename)) {
-    return NULL;
-  }
-
-  // canonicalize_abspath has the desirable side effect of preventing
-  // 'malicious' paths from going below '/' ... e.g.,
-  // if filename is '/home/pgbovine/../../../../'
-  // then filename_abspath is simply '/'
-  //
-  // this is why it's VERY IMPORTANT to canonicalize before creating a
-  // path into CDE_ROOT_DIR, so that absolute paths can't 'escape'
-  // the sandbox
-  char* filename_abspath = canonicalize_abspath(filename);
-  char* ret = create_abspath_within_cderoot(filename_abspath);
-  free(filename_abspath);
-
-  //printf("redirect_only_abspath_into_cderoot %s => %s\n", filename, ret);
   return ret;
 }
 
@@ -742,7 +743,7 @@ done
 
   char* redirected_path = NULL;
   if (CDE_exec_mode) {
-    redirected_path = redirect_only_abspath_into_cderoot(tcp->opened_filename);
+    redirected_path = redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
   }
 
   char* path_to_executable = NULL;
@@ -1228,7 +1229,7 @@ void CDE_begin_chdir(struct tcb* tcp) {
     // redirect the value of tcp->opened_filename to the fake path
     // within CDE_ROOT_DIR
     char* redirected_filename =
-      redirect_only_abspath_into_cderoot(tcp->opened_filename);
+      redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
     if (redirected_filename) {
       free(tcp->opened_filename);
       // don't free redirected_filename since tcp->opened_filename
@@ -1582,11 +1583,13 @@ void finish_setup_shmat(struct tcb* tcp) {
 
 
 // copy src into dst, redirecting it into cde-root/ if necessary
+// based on cde_starting_pwd
 //
 // dst should be big enough to hold a full path
 void strcpy_redirected_cderoot(char* dst, char* src) {
   assert(CDE_exec_mode);
-  char* redirected_src = redirect_only_abspath_into_cderoot(src);
+  // use cde_starting_pwd (TODO: is that correct?)
+  char* redirected_src = redirect_filename_into_cderoot(src, cde_starting_pwd);
   if (redirected_src) {
     strcpy(dst, redirected_src);
     free(redirected_src);
@@ -1643,16 +1646,9 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
 void CDE_end_getcwd(struct tcb* tcp) {
   if (!syserror(tcp)) {
     if (CDE_exec_mode) {
-      // spoof getcwd by only taking the part BELOW cde-root/
-      // e.g., if tcp->current_dir is:
-      //   /home/bob/cde-package/cde-root/home/alice/cool-experiment
-      // then return:
-      //   /home/alice/cool-experiment
-      // as cwd
-      char* spoofed_pwd = extract_sandboxed_pwd(tcp->current_dir);
-
+      char* sandboxed_pwd = extract_sandboxed_pwd(tcp->current_dir);
       memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0],
-                      spoofed_pwd, strlen(spoofed_pwd) + 1);
+                      sandboxed_pwd, strlen(sandboxed_pwd) + 1);
 
       // for debugging
       //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
