@@ -911,7 +911,8 @@ Process %u resumed (parent %d ready)\n",
 				--tcp->nchildren;
 				tcp = tcp->parent;
 				tcpchild->parent = tcp;
-        CDE_init_tcb_dir_fields(tcpchild); // pgbovine - do it AFTER you init parent
+        // pgbovine - upon some testing, it seems like we don't need this call ...
+        //CDE_init_tcb_dir_fields(tcpchild); // pgbovine - do it AFTER you init parent
 				++tcp->nchildren;
 			}
 			if (call_flags & CLONE_THREAD) {
