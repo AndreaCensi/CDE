@@ -1185,6 +1185,7 @@ void CDE_end_file_rename(struct tcb* tcp) {
 void CDE_begin_chdir(struct tcb* tcp) {
   CDE_begin_standard_fileop(tcp, "chdir");
 
+  // TODO: do we still need to do this if we use /proc/<pid>/cwd to get the real cwd?
   if (CDE_exec_mode) {
     // redirect the value of tcp->opened_filename to the fake path
     // within CDE_ROOT_DIR
@@ -1205,9 +1206,26 @@ void CDE_end_chdir(struct tcb* tcp) {
   // only do this on success
   if (tcp->u_rval == 0) {
     // update current_dir
+
+    // A reliable way to get the current directory is using /proc/<pid>/cwd
+    char* cwd_symlink_name = format("/proc/%d/cwd", tcp->pid);
+
+    tcp->current_dir[0] = '\0';
+    int len = readlink(cwd_symlink_name, tcp->current_dir, MAXPATHLEN);
+    assert(tcp->current_dir[0] != '\0');
+    assert(len >= 0);
+    tcp->current_dir[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
+
+    free(cwd_symlink_name);
+
+
+    // this is the old way that is now obsolete due to /proc/<pid>/cwd
+    /*
     char* tmp = canonicalize_path(tcp->opened_filename, tcp->current_dir);
     strcpy(tcp->current_dir, tmp);
     free(tmp);
+    */
+
 
     // now copy into cde-root/ if necessary
     if (!CDE_exec_mode) {
@@ -1239,10 +1257,28 @@ void CDE_end_fchdir(struct tcb* tcp) {
       char* new_dirname = readlink_strdup(fd_symlink_name);
       //printf("CDE_end_fchdir: %s (%d)\n", new_dirname, dir_fd);
 
+
       // update current_dir
+
+      // A reliable way to get the current directory is using /proc/<pid>/cwd
+      char* cwd_symlink_name = format("/proc/%d/cwd", tcp->pid);
+
+      tcp->current_dir[0] = '\0';
+      int len = readlink(cwd_symlink_name, tcp->current_dir, MAXPATHLEN);
+      assert(tcp->current_dir[0] != '\0');
+      assert(len >= 0);
+      tcp->current_dir[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
+
+      free(cwd_symlink_name);
+
+
+      // this is the old way that is now obsolete due to /proc/<pid>/cwd
+      /*
       char* tmp = canonicalize_path(new_dirname, tcp->current_dir);
       strcpy(tcp->current_dir, tmp);
       free(tmp);
+      */
+
 
       // now copy into cde-root/ if necessary
       if (!CDE_exec_mode) {
@@ -1564,6 +1600,8 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
 }
 
 
+// TODO: do we still need to keep track of tcp->child_current_pwd
+// if we can just directly access it using /proc/<pid>/cwd ???
 void CDE_end_getcwd(struct tcb* tcp) {
   if (!syserror(tcp)) {
     if (CDE_exec_mode) {
