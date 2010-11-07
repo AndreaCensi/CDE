@@ -1826,7 +1826,8 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
     find_and_copy_possible_dynload_libs(filename, child_current_pwd);
   }
   else { // symlink to directory
-    // DO NOTHING!
+    // make sure the target directory actually exists
+    mkdir_recursive(symlink_dst_abspath, 0);
   }
 
   free(symlink_loc_in_package);
