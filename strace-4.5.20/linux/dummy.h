@@ -55,7 +55,7 @@
 #define	sys_swapon		sys_chdir
 #define	sys_swapoff		sys_chdir
 #define	sys_delete_module	sys_open
-#define	sys_fchdir		sys_close
+/*#define	sys_fchdir		sys_close*/ // pgbovine - don't spoof this syscall; we need to track it!
 #define	sys_setfsuid		sys_setuid
 #define	sys_setfsgid		sys_setgid
 #define	sys_acct		sys_chdir

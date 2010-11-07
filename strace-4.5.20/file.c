@@ -48,6 +48,7 @@ extern void CDE_end_file_rename(struct tcb* tcp);
 
 extern void CDE_begin_chdir(struct tcb* tcp);
 extern void CDE_end_chdir(struct tcb* tcp);
+extern void CDE_end_fchdir(struct tcb* tcp);
 extern void CDE_begin_mkdir(struct tcb* tcp);
 extern void CDE_end_mkdir(struct tcb* tcp);
 extern void CDE_begin_rmdir(struct tcb* tcp);
@@ -1985,10 +1986,21 @@ sys_rmdir(struct tcb *tcp)
 int
 sys_fchdir(struct tcb *tcp)
 {
+  // pgbovine
+  if (entering(tcp)) {
+    // NOP
+  }
+  else {
+    CDE_end_fchdir(tcp);
+  }
+  return 0;
+
+  /*
 	if (entering(tcp)) {
 		tprintf("%ld", tcp->u_arg[0]);
 	}
 	return 0;
+  */
 }
 
 int
