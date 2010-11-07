@@ -62,6 +62,35 @@ extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
 extern char* find_ELF_program_interpreter(char * file_name); // from ../readelf-mini/libreadelf-mini.a
 
+
+// returns a component within real_pwd that represents the part within
+// cde_pseudo_root_dir
+// the return value should NOT be mutated; otherwise we might be screwed!
+static char* extract_sandboxed_pwd(char* real_pwd) {
+  assert(CDE_exec_mode);
+
+  // spoof getcwd by only taking the part BELOW cde-root/
+  // e.g., if real_pwd is:
+  //   /home/bob/cde-package/cde-root/home/alice/cool-experiment
+  // then return:
+  //   /home/alice/cool-experiment
+  // as cwd
+  int cde_pseudo_root_dir_len = strlen(cde_pseudo_root_dir);
+  // sanity check, make sure real_pwd is within/ cde_pseudo_root_dir
+  assert(strncmp(real_pwd, cde_pseudo_root_dir, cde_pseudo_root_dir_len) == 0);
+
+  char* sandboxed_pwd = (real_pwd + cde_pseudo_root_dir_len);
+
+  // special case for '/' directory:
+  if (strlen(sandboxed_pwd) == 0) {
+    return "/";
+  }
+  else {
+    return sandboxed_pwd;
+  }
+}
+
+
 // prepend $CDE_ROOT_DIR to the given path string, assumes that the string
 // starts with '/' (i.e., it's an absolute path)
 //
@@ -534,6 +563,7 @@ static char* redirect_only_abspath_into_cderoot(char* filename) {
 
   assert(filename);
   if (!IS_ABSPATH(filename)) {
+    printf("redirect_only_abspath_into_cderoot (relpath): '%s'\n", filename);
     return NULL;
   }
 
@@ -1605,36 +1635,16 @@ static void memcpy_to_child(int pid, char* dst_child, char* src, int size) {
 void CDE_end_getcwd(struct tcb* tcp) {
   if (!syserror(tcp)) {
     if (CDE_exec_mode) {
-      // TODO: tcp->u_arg[1] indicates the size of the destination
-      // buffer ... if it's not big enough, you can return -1 and force
-      // the program to try again
-      // http://linux.die.net/man/2/getcwd
-
-      // interesting: this might give weird results for the coreutils
-      // 'pwd' program since pwd doesn't actually call getcwd() ... it
-      // does its own funky-ass thing!
-
       // spoof getcwd by only taking the part BELOW cde-root/
       // e.g., if tcp->current_dir is:
       //   /home/bob/cde-package/cde-root/home/alice/cool-experiment
       // then return:
       //   /home/alice/cool-experiment
       // as cwd
-      int cde_pseudo_root_dir_len = strlen(cde_pseudo_root_dir);
-      // sanity check, make sure tcp->current_dir is within/ cde_pseudo_root_dir
-      assert(strncmp(tcp->current_dir, cde_pseudo_root_dir,
-                     cde_pseudo_root_dir_len) == 0);
+      char* spoofed_pwd = extract_sandboxed_pwd(tcp->current_dir);
 
-      char* fake_cwd = (tcp->current_dir + cde_pseudo_root_dir_len);
-      int fake_cwd_len = strlen(fake_cwd);
-
-      // special case for '/' directory:
-      if (fake_cwd_len == 0) {
-        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], "/", 2);
-      }
-      else {
-        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0], fake_cwd, fake_cwd_len + 1);
-      }
+      memcpy_to_child(tcp->pid, (char*)tcp->u_arg[0],
+                      spoofed_pwd, strlen(spoofed_pwd) + 1);
 
       // for debugging
       //char* tmp = strcpy_from_child(tcp, tcp->u_arg[0]);
