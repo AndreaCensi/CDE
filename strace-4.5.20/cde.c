@@ -1184,6 +1184,20 @@ void CDE_end_file_rename(struct tcb* tcp) {
 
 void CDE_begin_chdir(struct tcb* tcp) {
   CDE_begin_standard_fileop(tcp, "chdir");
+
+  if (CDE_exec_mode) {
+    // redirect the value of tcp->opened_filename to the fake path
+    // within CDE_ROOT_DIR
+    char* redirected_filename =
+      redirect_only_abspath_into_cderoot(tcp->opened_filename);
+    if (redirected_filename) {
+      free(tcp->opened_filename);
+      // don't free redirected_filename since tcp->opened_filename
+      // now points to it
+      tcp->opened_filename = redirected_filename;
+    }
+  }
+
 }
 
 void CDE_end_chdir(struct tcb* tcp) {
