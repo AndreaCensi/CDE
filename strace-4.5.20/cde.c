@@ -572,6 +572,14 @@ static char* redirect_only_abspath_into_cderoot(char* filename) {
     return NULL;
   }
 
+  // canonicalize_abspath has the desirable side effect of preventing
+  // 'malicious' paths from going below '/' ... e.g.,
+  // if filename is '/home/pgbovine/../../../../'
+  // then filename_abspath is simply '/'
+  //
+  // this is why it's VERY IMPORTANT to canonicalize before creating a
+  // path into CDE_ROOT_DIR, so that absolute paths can't 'escape'
+  // the sandbox
   char* filename_abspath = canonicalize_abspath(filename);
   char* ret = create_abspath_within_cderoot(filename_abspath);
   free(filename_abspath);
