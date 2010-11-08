@@ -1235,60 +1235,13 @@ void CDE_end_file_rename(struct tcb* tcp) {
 
 void CDE_begin_chdir(struct tcb* tcp) {
   CDE_begin_standard_fileop(tcp, "chdir");
-
-  // TODO: do we still need to do this if we use /proc/<pid>/cwd to get the real cwd?
-  if (CDE_exec_mode) {
-    // redirect the value of tcp->opened_filename to the fake path
-    // within CDE_ROOT_DIR
-    char* redirected_filename =
-      redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
-    if (redirected_filename) {
-      free(tcp->opened_filename);
-      // don't free redirected_filename since tcp->opened_filename
-      // now points to it
-      tcp->opened_filename = redirected_filename;
-    }
-  }
 }
 
+// don't forget that tcp->opened_filename has been initialized here
 void CDE_end_chdir(struct tcb* tcp) {
   assert(tcp->opened_filename);
 
-  // only do this on success
-  if (tcp->u_rval == 0) {
-    // update current_dir
-
-    // A reliable way to get the current directory is using /proc/<pid>/cwd
-    char* cwd_symlink_name = format("/proc/%d/cwd", tcp->pid);
-
-    tcp->current_dir[0] = '\0';
-    int len = readlink(cwd_symlink_name, tcp->current_dir, MAXPATHLEN);
-    assert(tcp->current_dir[0] != '\0');
-    assert(len >= 0);
-    tcp->current_dir[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
-
-    free(cwd_symlink_name);
-
-
-    // this is the old way that is now obsolete due to /proc/<pid>/cwd
-    /*
-    char* tmp = canonicalize_path(tcp->opened_filename, tcp->current_dir);
-    strcpy(tcp->current_dir, tmp);
-    free(tmp);
-    */
-
-
-    // now copy into cde-root/ if necessary
-    if (!CDE_exec_mode) {
-      // TODO: should we use tcp->current_dir as first arg below?
-      char* redirected_path =
-        redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
-      if (redirected_path) {
-        mkdir_recursive(redirected_path, 0);
-        free(redirected_path);
-      }
-    }
-  }
+  CDE_end_fchdir(tcp); // this will update tcp->current_dir
 
   free(tcp->opened_filename);
   tcp->opened_filename = NULL;
@@ -1297,26 +1250,6 @@ void CDE_end_chdir(struct tcb* tcp) {
 void CDE_end_fchdir(struct tcb* tcp) {
   // only do this on success
   if (tcp->u_rval == 0) {
-
-    // we don't need this step anymore since we can get an updated cwd
-    // directly from /proc/<pid>/cwd
-    /*
-    // tcp->u_arg[0] is the fd pointing to the directory to chdir into
-    int dir_fd = (int)tcp->u_arg[0];
-
-    // use the fd symlink in the /proc filesystem to figure out the
-    // filename that this fd is referring to
-    char* fd_symlink_name = format("/proc/%d/fd/%d", tcp->pid, dir_fd);
-
-    // we're assuming that fd_symlink_name exists and points to a real file
-    char new_dirname[MAXPATHLEN];
-    new_dirname[0] = '\0';
-    int len = readlink(fd_symlink_name, new_dirname, MAXPATHLEN);
-    assert(new_dirname != '\0');
-    assert(len >= 0);
-    new_dirname[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
-    */
-
     // update current_dir
 
     // A reliable way to get the current directory is using /proc/<pid>/cwd
@@ -1329,14 +1262,6 @@ void CDE_end_fchdir(struct tcb* tcp) {
     tcp->current_dir[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
 
     free(cwd_symlink_name);
-
-
-    // this is the old way that is now obsolete due to /proc/<pid>/cwd
-    /*
-    char* tmp = canonicalize_path(new_dirname, tcp->current_dir);
-    strcpy(tcp->current_dir, tmp);
-    free(tmp);
-    */
 
 
     // now copy into cde-root/ if necessary
@@ -1348,8 +1273,6 @@ void CDE_end_fchdir(struct tcb* tcp) {
         free(redirected_path);
       }
     }
-
-    //free(fd_symlink_name);
   }
 }
 
