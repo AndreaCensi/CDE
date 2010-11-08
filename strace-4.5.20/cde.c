@@ -1681,8 +1681,8 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
   // target file must exist, so let's resolve its name
   char* orig_symlink_target = readlink_strdup(filename_abspath);
 
-  char* filename_copy = strdup(filename); // dirname() destroys its arg
-  char* dir = dirname(filename_copy);
+  char* filename_abspath_copy = strdup(filename_abspath); // dirname() destroys its arg
+  char* dir = dirname(filename_abspath_copy);
 
   char* dir_realpath = realpath_strdup(dir);
 
@@ -1776,7 +1776,7 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
   free(symlink_loc_in_package);
   free(symlink_target_abspath);
   free(symlink_dst_abspath);
-  free(filename_copy);
+  free(filename_abspath_copy);
   free(orig_symlink_target);
   free(filename_abspath);
 }
