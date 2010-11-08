@@ -95,6 +95,7 @@ extern void free_tcb_CDE_fields(struct tcb* tcp);
 extern void copy_file(char* src_filename, char* dst_filename);
 extern void strcpy_redirected_cderoot(char* dst, char* src);
 extern void CDE_create_path_symlink_dirs(void);
+extern void CDE_create_toplevel_symlink_dirs(void);
 extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern void CDE_init_pseudo_root_dir(void);
 extern void CDE_create_convenience_scripts(char* target_program_name);
@@ -620,6 +621,8 @@ startup_child (char **argv)
     fclose(envF);
 
     CDE_create_path_symlink_dirs();
+
+    CDE_create_toplevel_symlink_dirs();
   }
 
 

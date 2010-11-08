@@ -17,6 +17,7 @@
 
 #include "cde.h"
 #include "paths.h"
+#include <dirent.h>
 
 
 // TODO: eliminate this hack if it results in a compile-time error
@@ -221,8 +222,12 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
   char is_symlink = S_ISLNK(filename_stat.st_mode);
 
   if (is_symlink) {
-    // this will follow the symlink ...
-    EXITIF(stat(filename_abspath, &filename_stat));
+    // 'stat' will follow the symlink ...
+    if (stat(filename_abspath, &filename_stat)) {
+      // be failure-oblivious here
+      fprintf(stderr, "CDE WARNING: target of '%s' symlink cannot be found\n", filename_abspath);
+      goto done;
+    }
   }
 
   // by now, filename_stat contains the info for the actual target file,
@@ -1613,6 +1618,8 @@ void CDE_end_getcwd(struct tcb* tcp) {
 // This takes care of cases where, say, /bin is actually a symlink to
 // another directory like /KNOPPIX/bin.  We need to create a symlink
 // 'bin' in cde-root/ and point it to ./KNOPPIX/bin
+//
+// DO THIS AT THE VERY BEGINNING OF EXECUTION!
 void CDE_create_path_symlink_dirs() {
   char *p;
   int m, n;
@@ -1642,22 +1649,14 @@ void CDE_create_path_symlink_dirs() {
     }
   }
 
-  // also, this is hacky, but also check /lib and /usr/lib to see
-  // whether they're symlinks.  ld-linux.so.2 will likely try to look
+  // also, this is hacky, but also check /usr/lib to see
+  // whether it's a symlink.  ld-linux.so.2 will likely try to look
   // for libraries in those places, but they're not in any convenient
   // environment variable
-
-  strcpy(tmp_buf, "/lib");
-  // this will NOT follow the symlink ...
-  if (lstat(tmp_buf, &st) == 0) {
-    char is_symlink = S_ISLNK(st.st_mode);
-    if (is_symlink) {
-      char* tmp = strdup(tmp_buf);
-      copy_file_into_cde_root(tmp, cde_starting_pwd);
-      free(tmp);
-    }
-  }
-
+  //
+  // note that the other 2 directories that ld-linux.so.2 usually
+  // tries to look for libs in, /bin and /lib, will be taken care of by
+  // CDE_create_toplevel_symlink_dirs()
   strcpy(tmp_buf, "/usr/lib");
   // this will NOT follow the symlink ...
   if (lstat(tmp_buf, &st) == 0) {
@@ -1668,6 +1667,48 @@ void CDE_create_path_symlink_dirs() {
       free(tmp);
     }
   }
+}
+
+// scan through all files at top-level root directory ('/') and find if
+// any of them are symlinks.  if so, then copy the symlinks and their
+// targets into CDE_ROOT_DIR, so that we can faithfully mirror the
+// original filesystem (at least w.r.t. toplevel symlinks).
+//
+// this is necessary to ensure proper functioning
+// on filesystems that have symlinks at the top level.  e.g., on Knoppix
+// 2006-06-01 LiveCD, here is the top-level filesystem structure:
+/*
+  /
+    UNIONFS/
+      bin
+      boot
+      etc
+      ...
+    ramdisk/
+      home/
+    bin  --> /UNIONFS/bin   (symlink!)
+    boot --> /UNIONFS/boot  (symlink!)
+    home --> /ramdisk/home  (symlink)
+    etc  --> /UNIONFS/etc   (symlink!)
+    ...
+    usr --> /UNIONFS/usr
+*/
+void CDE_create_toplevel_symlink_dirs() {
+  DIR* dp = opendir("/");
+  assert(dp);
+  struct dirent *ep;
+  while ((ep = readdir(dp))) {
+    char* toplevel_abspath = format("/%s", ep->d_name); // make into abspath
+    struct stat st;
+    if (lstat(toplevel_abspath, &st) == 0) {
+      char is_symlink = S_ISLNK(st.st_mode);
+      if (is_symlink) {
+        copy_file_into_cde_root(toplevel_abspath, cde_starting_pwd);
+      }
+    }
+    free(toplevel_abspath);
+  }
+  closedir(dp);
 }
 
 
