@@ -931,7 +931,7 @@ done
       }
 
       // now populate the original program name from tcp->u_arg[0]
-      new_argv[script_command_num_tokens + 1] = tcp->u_arg[0];
+      new_argv[script_command_num_tokens + 1] = (char*)tcp->u_arg[0];
 
       // now populate argv[script_command_num_tokens+1:] directly from child's original space
       // (original arguments)
@@ -1236,6 +1236,8 @@ void CDE_end_file_rename(struct tcb* tcp) {
 void CDE_begin_chdir(struct tcb* tcp) {
   CDE_begin_standard_fileop(tcp, "chdir");
 }
+
+void CDE_end_fchdir(struct tcb* tcp);
 
 // don't forget that tcp->opened_filename has been initialized here
 void CDE_end_chdir(struct tcb* tcp) {
