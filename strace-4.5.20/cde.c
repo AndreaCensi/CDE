@@ -550,6 +550,12 @@ static void modify_syscall_two_args(struct tcb* tcp) {
 // return NULL if the filename should NOT be redirected
 // WARNING: behavior differs based on CDE_exec_mode!
 static char* redirect_filename_into_cderoot(char* filename, char* child_current_pwd) {
+  /* sometimes this is called with a null arg ... investigate further
+     before making this hack permanent, though
+  if (!filename) {
+    return NULL;
+  }
+  */
   assert(filename);
   assert(child_current_pwd);
 
@@ -585,7 +591,7 @@ static char* redirect_filename_into_cderoot(char* filename, char* child_current_
   char* ret = create_abspath_within_cderoot(filename_abspath);
   free(filename_abspath);
 
-  //printf("redirect_filename_into_cderoot %s [%s] => %s\n", filename, child_current_pwd, ret);
+  //printf("redirect_filename_into_cderoot %s => %s\n", filename, ret);
   return ret;
 }
 
@@ -1274,6 +1280,7 @@ void CDE_end_chdir(struct tcb* tcp) {
 
     // now copy into cde-root/ if necessary
     if (!CDE_exec_mode) {
+      // TODO: should we use tcp->current_dir as first arg below?
       char* redirected_path =
         redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
       if (redirected_path) {
@@ -1288,56 +1295,61 @@ void CDE_end_chdir(struct tcb* tcp) {
 }
 
 void CDE_end_fchdir(struct tcb* tcp) {
-  if (!CDE_exec_mode) {
-    // only do this on success
-    if (tcp->u_rval == 0) {
-      // tcp->u_arg[0] is the fd pointing to the directory to chdir into
-      int dir_fd = (int)tcp->u_arg[0];
+  // only do this on success
+  if (tcp->u_rval == 0) {
 
-      // use the fd symlink in the /proc filesystem to figure out the
-      // filename that this fd is referring to
-      char* fd_symlink_name = format("/proc/%d/fd/%d", tcp->pid, dir_fd);
+    // we don't need this step anymore since we can get an updated cwd
+    // directly from /proc/<pid>/cwd
+    /*
+    // tcp->u_arg[0] is the fd pointing to the directory to chdir into
+    int dir_fd = (int)tcp->u_arg[0];
 
-      // we're assuming that fd_symlink_name exists and points to a real file
-      char* new_dirname = readlink_strdup(fd_symlink_name);
-      //printf("CDE_end_fchdir: %s (%d)\n", new_dirname, dir_fd);
+    // use the fd symlink in the /proc filesystem to figure out the
+    // filename that this fd is referring to
+    char* fd_symlink_name = format("/proc/%d/fd/%d", tcp->pid, dir_fd);
+
+    // we're assuming that fd_symlink_name exists and points to a real file
+    char new_dirname[MAXPATHLEN];
+    new_dirname[0] = '\0';
+    int len = readlink(fd_symlink_name, new_dirname, MAXPATHLEN);
+    assert(new_dirname != '\0');
+    assert(len >= 0);
+    new_dirname[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
+    */
+
+    // update current_dir
+
+    // A reliable way to get the current directory is using /proc/<pid>/cwd
+    char* cwd_symlink_name = format("/proc/%d/cwd", tcp->pid);
+
+    tcp->current_dir[0] = '\0';
+    int len = readlink(cwd_symlink_name, tcp->current_dir, MAXPATHLEN);
+    assert(tcp->current_dir[0] != '\0');
+    assert(len >= 0);
+    tcp->current_dir[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
+
+    free(cwd_symlink_name);
 
 
-      // update current_dir
-
-      // A reliable way to get the current directory is using /proc/<pid>/cwd
-      char* cwd_symlink_name = format("/proc/%d/cwd", tcp->pid);
-
-      tcp->current_dir[0] = '\0';
-      int len = readlink(cwd_symlink_name, tcp->current_dir, MAXPATHLEN);
-      assert(tcp->current_dir[0] != '\0');
-      assert(len >= 0);
-      tcp->current_dir[len] = '\0'; // wow, readlink doesn't put the cap on the end!!!
-
-      free(cwd_symlink_name);
+    // this is the old way that is now obsolete due to /proc/<pid>/cwd
+    /*
+    char* tmp = canonicalize_path(new_dirname, tcp->current_dir);
+    strcpy(tcp->current_dir, tmp);
+    free(tmp);
+    */
 
 
-      // this is the old way that is now obsolete due to /proc/<pid>/cwd
-      /*
-      char* tmp = canonicalize_path(new_dirname, tcp->current_dir);
-      strcpy(tcp->current_dir, tmp);
-      free(tmp);
-      */
-
-
-      // now copy into cde-root/ if necessary
-      if (!CDE_exec_mode) {
-        char* redirected_path =
-          redirect_filename_into_cderoot(new_dirname, tcp->current_dir);
-        if (redirected_path) {
-          mkdir_recursive(redirected_path, 0);
-          free(redirected_path);
-        }
+    // now copy into cde-root/ if necessary
+    if (!CDE_exec_mode) {
+      char* redirected_path =
+        redirect_filename_into_cderoot(tcp->current_dir, tcp->current_dir);
+      if (redirected_path) {
+        mkdir_recursive(redirected_path, 0);
+        free(redirected_path);
       }
-
-      free(new_dirname);
-      free(fd_symlink_name);
     }
+
+    //free(fd_symlink_name);
   }
 }
 
