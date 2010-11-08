@@ -924,11 +924,14 @@ done
         new_argv[i+1] = (char*)tcp->childshm + (script_command_token_starts[i] - base);
       }
 
-      // now populate argv[script_command_num_tokens:] directly from child's original space
+      // now populate the original program name from tcp->u_arg[0]
+      new_argv[script_command_num_tokens + 1] = tcp->u_arg[0];
+
+      // now populate argv[script_command_num_tokens+1:] directly from child's original space
       // (original arguments)
       char** child_argv = (char**)tcp->u_arg[1]; // in child's address space
       char* cur_arg = NULL;
-      i = 0; // start at argv[0]
+      i = 1; // start at argv[1]
       while (1) {
         EXITIF(umovestr(tcp, (long)(child_argv + i), sizeof cur_arg, (void*)&cur_arg) < 0);
         new_argv[i + script_command_num_tokens + 1] = cur_arg;
@@ -938,11 +941,13 @@ done
         i++;
       }
 
+      /*
       i = 0;
       cur_arg = NULL;
       while (1) {
         cur_arg = new_argv[i];
         if (cur_arg) {
+          printf("new_argv[%d] = %s\n", i, strcpy_from_child(tcp, cur_arg));
           i++;
         }
         // argv is null-terminated
@@ -950,6 +955,7 @@ done
           break;
         }
       }
+      */
 
       // now set ebx to the new program name and ecx to the new argv array
       // to alter the arguments of the execv system call :0
