@@ -153,7 +153,7 @@ static int ignore_path(char* filename) {
     return 1;
   }
 
-  // /dev and /proc are special system directories with fake files
+  // /dev, /proc, and /sys are special system directories with fake files
   //
   // .Xauthority is used for X11 authentication via ssh, so we need to
   // use the REAL version and not the one in cde-root/
@@ -165,6 +165,7 @@ static int ignore_path(char* filename) {
   // distros have a /tmp directory that anybody can write into
   if ((strncmp(filename, "/dev/", 5) == 0) ||
       (strncmp(filename, "/proc/", 6) == 0) ||
+      (strncmp(filename, "/sys/", 5) == 0) ||
       (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
       (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
       (strcmp(basename(filename), ".Xauthority") == 0)) {
