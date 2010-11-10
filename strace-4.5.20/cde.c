@@ -1671,8 +1671,8 @@ void CDE_create_path_symlink_dirs() {
 }
 
 // scan through all files at top-level root directory ('/') and find if
-// any of them are symlinks.  if so, then copy the symlinks and their
-// targets into CDE_ROOT_DIR, so that we can faithfully mirror the
+// any of them are symlinks to DIRECTORIES.  if so, then copy the symlinks
+// and their targets into CDE_ROOT_DIR, so that we can faithfully mirror the
 // original filesystem (at least w.r.t. toplevel symlinks).
 //
 // this is necessary to ensure proper functioning
@@ -1704,7 +1704,12 @@ void CDE_create_toplevel_symlink_dirs() {
     if (lstat(toplevel_abspath, &st) == 0) {
       char is_symlink = S_ISLNK(st.st_mode);
       if (is_symlink) {
-        copy_file_into_cde_root(toplevel_abspath, cde_starting_pwd);
+        struct stat real_st;
+        // only do this for top-level symlinks to DIRECTORIES
+        if ((stat(toplevel_abspath, &real_st) == 0) &&
+            S_ISDIR(real_st.st_mode)) {
+          copy_file_into_cde_root(toplevel_abspath, cde_starting_pwd);
+        }
       }
     }
     free(toplevel_abspath);
