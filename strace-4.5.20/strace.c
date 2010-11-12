@@ -888,7 +888,7 @@ main(int argc, char *argv[])
     FILE* log_f;
     if (stat(CDE_PACKAGE_DIR "/cde.log", &tmp)) {
       log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "w");
-      fprintf(log_f, "cd " CDE_ROOT_DIR "%s", cde_starting_pwd);
+      fprintf(log_f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
       fputc('\n', log_f);
     }
     else {
