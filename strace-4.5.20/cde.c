@@ -812,7 +812,13 @@ done
     ld_linux_filename = find_ELF_program_interpreter(path_to_executable);
     if (!ld_linux_filename) {
       // if the program interpreter isn't found, then it's a static
-      // binary, so let the execve call proceed unmodified
+      // binary, so let the execve call proceed normally
+      if (CDE_exec_mode) {
+        // redirect the executable's path to within $CDE_ROOT_DIR:
+        modify_syscall_first_arg(tcp);
+      }
+
+      // remember to EXIT EARLY!
       goto done;
     }
     assert(IS_ABSPATH(ld_linux_filename));
