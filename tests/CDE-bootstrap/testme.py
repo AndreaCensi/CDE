@@ -50,6 +50,5 @@ try:
   os.chdir(full_pwd) # make sure to chdir back!!!
 
 finally:
-  #(stdout, stderr) = Popen(["rm", "-rf", tmp_test_rootdir], stdout=PIPE, stderr=PIPE).communicate()
-  pass
+  (stdout, stderr) = Popen(["rm", "-rf", tmp_test_rootdir], stdout=PIPE, stderr=PIPE).communicate()
 
