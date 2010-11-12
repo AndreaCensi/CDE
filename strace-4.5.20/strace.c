@@ -881,11 +881,28 @@ main(int argc, char *argv[])
 
     CDE_create_convenience_scripts(argv[1]);
 
-    // make a text file called orig-run-pwd.txt that tells you how to get to the
-    // pwd from the original run
-    FILE* f = fopen(CDE_PACKAGE_DIR "/orig-run-pwd.txt", "w");
-    fprintf(f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
-    fclose(f);
+
+    // make a cde.log file that contains commands to reproduce original
+    // run within cde-package
+    struct stat tmp;
+    FILE* log_f;
+    if (stat(CDE_PACKAGE_DIR "/cde.log", &tmp)) {
+      log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "w");
+      fprintf(log_f, "cd " CDE_ROOT_DIR "%s", cde_starting_pwd);
+      fputc('\n', log_f);
+    }
+    else {
+      log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
+    }
+
+    fprintf(log_f, "./%s.cde", basename(argv[1]));
+    int i;
+    for (i = 2; i < argc; i++) {
+      fprintf(log_f, " %s", argv[i]);
+    }
+    fputc('\n', log_f);
+    fclose(log_f);
+
   }
 
 	/* Allocate the initial tcbtab.  */
