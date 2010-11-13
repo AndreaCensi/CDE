@@ -2033,7 +2033,7 @@ void CDE_init_ignore_paths() {
       }
       else {
         if (*p_index >= 100) {
-          fprintf(stderr, "Fatal error: more than 100 entries in cde.ignore\n", line);
+          fprintf(stderr, "Fatal error: more than 100 entries in cde.ignore\n");
           exit(1);
         }
         assert(array_to_set[*p_index] == NULL);
