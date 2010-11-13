@@ -101,6 +101,7 @@ extern void CDE_init_pseudo_root_dir(void);
 extern void CDE_create_convenience_scripts(char* target_program_name);
 extern char cde_starting_pwd[MAXPATHLEN];
 extern char cde_pseudo_root_dir[MAXPATHLEN];
+extern void CDE_init_ignore_paths(void);
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -907,6 +908,9 @@ main(int argc, char *argv[])
     fclose(log_f);
 
   }
+
+  CDE_init_ignore_paths(); // do this AFTER setting CDE_exec_mode
+
 
 	/* Allocate the initial tcbtab.  */
 	tcbtabsize = argc;	/* Surely enough for all -p args.  */

@@ -48,6 +48,13 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
 // the true pwd of the cde executable AT THE START of execution
 char cde_starting_pwd[MAXPATHLEN];
 
+// each non-null element should be a path to ignore in ignore_path()
+// these arrays are initialized in CDE_init_ignore_paths()
+static char* ignore_exact_paths[100];
+int ignore_exact_paths_ind = 0;
+static char* ignore_prefix_paths[100];
+int ignore_prefix_paths_ind = 0;
+
 // the absolute path to the cde-root/ directory, since that will be
 // where our fake filesystem starts. e.g., if cde_starting_pwd is
 //   /home/bob/cde-package/cde-root/home/alice/cool-experiment
@@ -170,6 +177,20 @@ static int ignore_path(char* filename) {
       (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
       (strcmp(basename(filename), ".Xauthority") == 0)) {
     return 1;
+  }
+
+  // custom ignore paths, as specified in cde.ignore
+  int i;
+  for (i = 0; i < ignore_exact_paths_ind; i++) {
+    if (strcmp(filename, ignore_exact_paths[i]) == 0) {
+      return 1;
+    }
+  }
+  for (i = 0; i < ignore_prefix_paths_ind; i++) {
+    char* p = ignore_prefix_paths[i];
+    if (strncmp(filename, p, strlen(p)) == 0) {
+      return 1;
+    }
   }
 
   return 0;
@@ -1943,5 +1964,94 @@ void CDE_create_convenience_scripts(char* target_program_fullpath) {
   }
 
   free(cde_script_name);
+}
+
+// initialize ignore_exact_paths and ignore_prefix_paths based on
+// the cde.ignore file, which has the grammar:
+// ignore_prefix=<path prefix to ignore>
+// ignore_exact=<exact path to ignore>
+void CDE_init_ignore_paths() {
+  memset(ignore_exact_paths, 0, sizeof(ignore_exact_paths));
+  memset(ignore_prefix_paths, 0, sizeof(ignore_prefix_paths));
+
+  ignore_exact_paths_ind = 0;
+  ignore_prefix_paths_ind = 0;
+
+  FILE* f = NULL;
+
+  if (CDE_exec_mode) {
+    // look for a cde.ignore file in $CDE_PACKAGE_DIR
+
+    // you must run this AFTER running CDE_init_pseudo_root_dir()
+    char* ignore_file = format("%s/../cde.ignore", cde_pseudo_root_dir);
+    f = fopen(ignore_file, "r");
+    free(ignore_file);
+  }
+  else {
+    // look for a cde.ignore file in pwd
+    f = fopen("cde.ignore", "r");
+
+    // if found, copy it into the package
+    if (f) {
+      copy_file("cde.ignore", CDE_PACKAGE_DIR "/cde.ignore");
+    }
+  }
+
+  if (!f) {
+    return;
+  }
+
+
+  char* line = NULL;
+  size_t len = 0;
+  ssize_t read;
+  while ((read = getline(&line, &len, f)) != -1) {
+    assert(line[read-1] == '\n');
+    line[read-1] = '\0'; // strip of trailing newline
+
+    char* p;
+    char is_first_token = 1;
+    char** array_to_set = NULL;
+    int* p_index = NULL;
+
+    for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
+      if (is_first_token) {
+        if (strcmp(p, "ignore_exact") == 0) {
+          array_to_set = ignore_exact_paths;
+          p_index = &ignore_exact_paths_ind;
+        }
+        else if (strcmp(p, "ignore_prefix") == 0) {
+          array_to_set = ignore_prefix_paths;
+          p_index = &ignore_prefix_paths_ind;
+        }
+        else {
+          fprintf(stderr, "Fatal error in cde.ignore: unrecognized token '%s'\n", p);
+          exit(1);
+        }
+
+        is_first_token = 0;
+      }
+      else {
+        if (*p_index >= 100) {
+          fprintf(stderr, "Fatal error: more than 100 entries in cde.ignore\n", line);
+          exit(1);
+        }
+        assert(array_to_set[*p_index] == NULL);
+        array_to_set[*p_index] = strdup(p);
+        (*p_index)++;
+        break;
+      }
+    }
+  }
+
+  // print for sanity checking
+  int i;
+  for (i = 0; i < ignore_exact_paths_ind; i++) {
+    fprintf(stderr, "CDE ignoring exact path: '%s'\n", ignore_exact_paths[i]);
+  }
+  for (i = 0; i < ignore_prefix_paths_ind; i++) {
+    fprintf(stderr, "CDE ignoring paths starting with: '%s'\n", ignore_prefix_paths[i]);
+  }
+
 }
 
