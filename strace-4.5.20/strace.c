@@ -877,7 +877,10 @@ main(int argc, char *argv[])
 
     // pgbovine - copy 'cde' executable to $CDE_PACKAGE_DIR and rename
     // it 'cde-exec', so that it can be included in the executable
-    copy_file(argv[0], CDE_PACKAGE_DIR "/cde-exec");
+    //
+    // use /proc/self/exe since argv[0] might be simply 'cde'
+    // (if the cde binary is in $PATH and we're invoking it only by its name)
+    copy_file("/proc/self/exe", CDE_PACKAGE_DIR "/cde-exec");
 
     CDE_create_convenience_scripts(argv[1]);
 
