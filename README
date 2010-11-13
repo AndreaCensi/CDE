@@ -1,3 +1,10 @@
 CDE: automatic packaging of Code, Data, and Environment
 http://www.stanford.edu/~pgbovine/cde.html
 Copyright 2010 Philip Guo
+
+Current license:
+
+  Since the current version of CDE is heavily built upon strace, it
+  carries the same BSD-style license as the enclosing strace source
+  code.  see this file for details: strace-4.5.20/COPYRIGHT
+
