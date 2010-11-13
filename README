@@ -4,10 +4,27 @@ Copyright (C) 2010 Philip Guo <pg@cs.stanford.edu>
 
 License:
 
-Since the current version of CDE is heavily built upon strace, it
-carries the same BSD-style license as the enclosing strace source code.
+CDE is currently licensed under GPL v3:
 
-strace license from this file: strace-4.5.20/COPYRIGHT
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA
+   02110-1301, USA.
+
+---
+
+The current version of CDE is heavily built upon strace, whose license
+is in this file: strace-4.5.20/COPYRIGHT
 
 Copyright (c) 1991, 1992 Paul Kranenburg <pk@cs.few.eur.nl>
 Copyright (c) 1993 Branko Lankester <branko@hacktic.nl>
@@ -38,4 +55,35 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+---
+
+CDE also uses the libreadelf-mini.a library within the readelf-mini/
+directory, which is a modified version of the readelf program from GNU
+binutils-2.20.1.  It carries the following license, as written in
+readelf-mini/readelf-mini.c :
+
+/* readelf.c -- display contents of an ELF format file
+   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007,
+   2008, 2009  Free Software Foundation, Inc.
+
+   Originally developed by Eric Youngdale <eric@andante.jic.com>
+   Modifications by Nick Clifton <nickc@redhat.com>
+
+   This file is part of GNU Binutils.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA
+   02110-1301, USA.  */
 
