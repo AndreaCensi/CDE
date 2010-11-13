@@ -2,8 +2,8 @@
 #define _CDE_H
 
 // TODO: we probably don't need most of these #includes
-#include <sys/user.h>
 #include <sys/select.h>
+#include <sys/user.h> // a user told me that user.h should go after select.h to fix a compile error
 #include <sys/time.h>
 #include <string.h>
 #include <utime.h>
