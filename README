@@ -1,30 +1,24 @@
 CDE: automatic packaging of Code, Data, and Environment
 http://www.stanford.edu/~pgbovine/cde.html
-Copyright (C) 2010 Philip Guo <pg@cs.stanford.edu>
-
-License:
 
 CDE is currently licensed under GPL v3:
 
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
-   (at your option) any later version.
+  Copyright (c) 2010 Philip Guo <pg@cs.stanford.edu>
 
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation; either version 3 of the License, or
+  (at your option) any later version.
 
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA
-   02110-1301, USA.
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
 
 ---
 
-The current version of CDE is heavily built upon strace, whose license
-is in this file: strace-4.5.20/COPYRIGHT
+CDE is heavily built upon strace, whose license is in this file:
+strace-4.5.20/COPYRIGHT
 
 Copyright (c) 1991, 1992 Paul Kranenburg <pk@cs.few.eur.nl>
 Copyright (c) 1993 Branko Lankester <branko@hacktic.nl>
