@@ -173,15 +173,12 @@ static int ignore_path(char* filename) {
   // there, or else you will risk severely 'overfitting' and ruining
   // portability across machines.  it's safe to assume that all Linux
   // distros have a /tmp directory that anybody can write into
-  //
-  // also ignore sensitive files like "/etc/passwd"
   if ((strncmp(filename, "/dev/", 5) == 0) ||
       (strncmp(filename, "/proc/", 6) == 0) ||
       (strncmp(filename, "/sys/", 5) == 0) ||
       (strncmp(filename, "/var/", 5) == 0) ||
       (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
       (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
-      (strcmp(filename, "/etc/passwd") == 0) ||
       (strcmp(basename(filename), ".Xauthority") == 0)) {
     return 1;
   }
