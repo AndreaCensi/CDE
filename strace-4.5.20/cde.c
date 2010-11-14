@@ -162,6 +162,9 @@ static int ignore_path(char* filename) {
 
   // /dev, /proc, and /sys are special system directories with fake files
   //
+  // /var contains 'volatile' temp files that change when system is
+  // running normally
+  //
   // .Xauthority is used for X11 authentication via ssh, so we need to
   // use the REAL version and not the one in cde-root/
   //
@@ -175,6 +178,7 @@ static int ignore_path(char* filename) {
   if ((strncmp(filename, "/dev/", 5) == 0) ||
       (strncmp(filename, "/proc/", 6) == 0) ||
       (strncmp(filename, "/sys/", 5) == 0) ||
+      (strncmp(filename, "/var/", 5) == 0) ||
       (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
       (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
       (strcmp(filename, "/etc/passwd") == 0) ||
