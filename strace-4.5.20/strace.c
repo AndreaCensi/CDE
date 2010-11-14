@@ -102,6 +102,7 @@ extern void CDE_create_convenience_scripts(char* target_program_name);
 extern char cde_starting_pwd[MAXPATHLEN];
 extern char cde_pseudo_root_dir[MAXPATHLEN];
 extern void CDE_init_ignore_paths(void);
+extern char CDE_no_default_path_ignores;
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -202,6 +203,8 @@ int exitval;
             "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n\n"
             "usage: cde <command to run and package>\n");
   }
+
+  fprintf(ofp, "\nOptions:\n  -n : Do not ignore any paths except for those you specify in cde.ignore\n");
 	exit(exitval);
 }
 
@@ -521,8 +524,11 @@ startup_child (char **argv)
   // non-reproducibility, so simply disable it
   setenv("CCACHE_DISABLE", "1", 1);
 
-  // pgbovine - muck with selected environment variables depending on CDE_exec_mode
+  // pgbovine - do all the real initialization here after all the
+  // command-line options have been processed and stripped off of argv
   if (CDE_exec_mode) {
+    CDE_init_pseudo_root_dir();
+
     // load environment variables from "$cde_pseudo_root_dir/../cde.environment" file
     static char cde_environment_abspath[MAXPATHLEN];
     strcpy(cde_environment_abspath, cde_pseudo_root_dir);
@@ -594,6 +600,39 @@ startup_child (char **argv)
   else {
     mkdir(CDE_PACKAGE_DIR, 0777);
     mkdir(CDE_ROOT_DIR, 0777);
+
+    // pgbovine - copy 'cde' executable to $CDE_PACKAGE_DIR and rename
+    // it 'cde-exec', so that it can be included in the executable
+    //
+    // use /proc/self/exe since argv[0] might be simply 'cde'
+    // (if the cde binary is in $PATH and we're invoking it only by its name)
+    copy_file("/proc/self/exe", CDE_PACKAGE_DIR "/cde-exec");
+
+    // argv[0] is now the target program name
+    CDE_create_convenience_scripts(argv[0]);
+
+
+    // make a cde.log file that contains commands to reproduce original
+    // run within cde-package
+    struct stat tmp;
+    FILE* log_f;
+    if (stat(CDE_PACKAGE_DIR "/cde.log", &tmp)) {
+      log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "w");
+      fprintf(log_f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
+      fputc('\n', log_f);
+    }
+    else {
+      log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
+    }
+
+    fprintf(log_f, "./%s.cde", basename(argv[0]));
+    int i;
+    for (i = 1; argv[i] != NULL; i++) {
+      fprintf(log_f, " %s", argv[i]);
+    }
+    fputc('\n', log_f);
+    fclose(log_f);
+
 
     // save current value of selected environment vars to
     // "$CDE_PACKAGE_DIR/cde.environment" file
@@ -854,17 +893,19 @@ main(int argc, char *argv[])
   }
 	progname = argv[0];
 
-  // initialize this before doing anything else!
+  // pgbovine - initialize this before doing anything else!
   getcwd(cde_starting_pwd, sizeof cde_starting_pwd);
 
-  // pgbovine - allow most slutty of permissions for new files/directories
+  // pgbovine - allow most promiscuous permissions for new files/directories
   umask(0000);
 
   // pgbovine - if program name is 'cde-exec', then activate CDE_exec_mode
+  //
+  // don't do anything else yet since we haven't processed command-line
+  // options and stripped them off of argv.  wait to do all of the real
+  // initialization work within startup_child()
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
-
-    CDE_init_pseudo_root_dir(); 
   }
   else {
     CDE_exec_mode = 0;
@@ -872,44 +913,8 @@ main(int argc, char *argv[])
     if (argc < 2) {
       usage(stdout, 0);
     }
-
-    mkdir(CDE_PACKAGE_DIR, 0777);
-    mkdir(CDE_ROOT_DIR, 0777);
-
-    // pgbovine - copy 'cde' executable to $CDE_PACKAGE_DIR and rename
-    // it 'cde-exec', so that it can be included in the executable
-    //
-    // use /proc/self/exe since argv[0] might be simply 'cde'
-    // (if the cde binary is in $PATH and we're invoking it only by its name)
-    copy_file("/proc/self/exe", CDE_PACKAGE_DIR "/cde-exec");
-
-    CDE_create_convenience_scripts(argv[1]);
-
-
-    // make a cde.log file that contains commands to reproduce original
-    // run within cde-package
-    struct stat tmp;
-    FILE* log_f;
-    if (stat(CDE_PACKAGE_DIR "/cde.log", &tmp)) {
-      log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "w");
-      fprintf(log_f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
-      fputc('\n', log_f);
-    }
-    else {
-      log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
-    }
-
-    fprintf(log_f, "./%s.cde", basename(argv[1]));
-    int i;
-    for (i = 2; i < argc; i++) {
-      fprintf(log_f, " %s", argv[i]);
-    }
-    fputc('\n', log_f);
-    fclose(log_f);
-
   }
-
-  CDE_init_ignore_paths(); // do this AFTER setting CDE_exec_mode
+  CDE_init_ignore_paths(); // pgbovine - do this AFTER setting CDE_exec_mode
 
 
 	/* Allocate the initial tcbtab.  */
@@ -940,7 +945,7 @@ main(int argc, char *argv[])
 	qualify("verbose=all");
 	qualify("signal=all");
 	while ((c = getopt(argc, argv,
-		"+cCdfFhiqrtTvVxz"
+		"+cCdfFhinqrtTvVxz"
 #ifndef USE_PROCFS
 		"D"
 #endif
@@ -983,6 +988,10 @@ main(int argc, char *argv[])
 		case 'i':
 			iflag++;
 			break;
+		case 'n':
+      CDE_no_default_path_ignores = 1;
+      fprintf(stderr, "CDE not ignoring any paths except for those you specify in cde.ignore\n");
+      break;
 		case 'q':
 			qflag++;
 			break;

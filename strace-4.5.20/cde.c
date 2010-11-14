@@ -31,6 +31,10 @@ __asm__(".symver shmctl,shmctl@GLIBC_2.0"); // hack to eliminate glibc 2.2 depen
 // 0 for tracing regular execution
 char CDE_exec_mode;
 
+// if this is 1, the do not ignore ANY paths by default
+// activated by the -n option
+char CDE_no_default_path_ignores = 0;
+
 static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename, char* child_current_pwd);
@@ -160,27 +164,29 @@ static int ignore_path(char* filename) {
     return 1;
   }
 
-  // /dev, /proc, and /sys are special system directories with fake files
-  //
-  // /var contains 'volatile' temp files that change when system is
-  // running normally
-  //
-  // .Xauthority is used for X11 authentication via ssh, so we need to
-  // use the REAL version and not the one in cde-root/
-  //
-  // ignore "/tmp" and "/tmp/*" since programs often put lots of
-  // session-specific stuff into /tmp so DO NOT track files within
-  // there, or else you will risk severely 'overfitting' and ruining
-  // portability across machines.  it's safe to assume that all Linux
-  // distros have a /tmp directory that anybody can write into
-  if ((strncmp(filename, "/dev/", 5) == 0) ||
-      (strncmp(filename, "/proc/", 6) == 0) ||
-      (strncmp(filename, "/sys/", 5) == 0) ||
-      (strncmp(filename, "/var/", 5) == 0) ||
-      (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
-      (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
-      (strcmp(basename(filename), ".Xauthority") == 0)) {
-    return 1;
+  if (!CDE_no_default_path_ignores) {
+    // /dev, /proc, and /sys are special system directories with fake files
+    //
+    // /var contains 'volatile' temp files that change when system is
+    // running normally
+    //
+    // .Xauthority is used for X11 authentication via ssh, so we need to
+    // use the REAL version and not the one in cde-root/
+    //
+    // ignore "/tmp" and "/tmp/*" since programs often put lots of
+    // session-specific stuff into /tmp so DO NOT track files within
+    // there, or else you will risk severely 'overfitting' and ruining
+    // portability across machines.  it's safe to assume that all Linux
+    // distros have a /tmp directory that anybody can write into
+    if ((strncmp(filename, "/dev/", 5) == 0) ||
+        (strncmp(filename, "/proc/", 6) == 0) ||
+        (strncmp(filename, "/sys/", 5) == 0) ||
+        (strncmp(filename, "/var/", 5) == 0) ||
+        (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
+        (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
+        (strcmp(basename(filename), ".Xauthority") == 0)) {
+      return 1;
+    }
   }
 
   // custom ignore paths, as specified in cde.ignore
