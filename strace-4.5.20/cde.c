@@ -1925,14 +1925,18 @@ void CDE_init_pseudo_root_dir() {
   delete_path(p);
 }
 
-// create a '.cde' version of argv[1] inside the corresponding
+// create a '.cde' version of the target program inside the corresponding
 // location of cde_starting_pwd within CDE_ROOT_DIR, which is a
 // shell script that invokes it using cde-exec
 //
 // also, if target_program_fullpath is only a program name
 // (without any '/' chars in it, then also create a convenience script
 // at the top level of the package)
-void CDE_create_convenience_scripts(char* target_program_fullpath) {
+//
+// argv[optind] is the target program's name
+void CDE_create_convenience_scripts(char** argv, int optind) {
+  char* target_program_fullpath = argv[optind];
+
   // only take the basename to construct cde_script_name,
   // since target_program_fullpath could be a relative path like '../python'
   char* cde_script_name = format("%s.cde", basename(target_program_fullpath));
@@ -1956,7 +1960,12 @@ void CDE_create_convenience_scripts(char* target_program_fullpath) {
 
   FILE* f = fopen(progname_redirected, "w");
   fprintf(f, "#!/bin/sh\n");
-  fprintf(f, "%s/cde-exec %s $@\n", dot_dots, target_program_fullpath);
+  fprintf(f, "%s/cde-exec", dot_dots);
+  // include original command-line options
+  for (i = 1; i < optind; i++) {
+    fprintf(f, " \"%s\"", argv[i]);
+  }
+  fprintf(f, " %s $@\n", target_program_fullpath);
   fclose(f);
 
   chmod(progname_redirected, 0777); // now make the script executable
@@ -1967,7 +1976,14 @@ void CDE_create_convenience_scripts(char* target_program_fullpath) {
     char* toplevel_script_name = format("%s/%s", CDE_PACKAGE_DIR, cde_script_name);
     FILE* f = fopen(toplevel_script_name, "w");
     fprintf(f, "#!/bin/sh\n");
-    fprintf(f, "cd cde-root && ../cde-exec %s $@\n", target_program_fullpath);
+    fprintf(f, "cd cde-root && ../cde-exec");
+
+    // include original command-line options
+    for (i = 1; i < optind; i++) {
+      fprintf(f, " \"%s\"", argv[i]);
+    }
+    fprintf(f, " %s $@\n", target_program_fullpath);
+
     fclose(f);
     chmod(toplevel_script_name, 0777); // now make the script executable
     free(toplevel_script_name);
@@ -1975,6 +1991,36 @@ void CDE_create_convenience_scripts(char* target_program_fullpath) {
 
   free(cde_script_name);
 }
+
+
+void CDE_add_ignore_prefix_path(char* p) {
+  assert(ignore_prefix_paths[ignore_prefix_paths_ind] == NULL);
+  ignore_prefix_paths[ignore_prefix_paths_ind] = strdup(p);
+  ignore_prefix_paths_ind++;
+
+  fprintf(stderr, "CDE ignoring prefix path: '%s'\n",
+          ignore_prefix_paths[ignore_prefix_paths_ind - 1]);
+
+  if (ignore_prefix_paths_ind >= 100) {
+    fprintf(stderr, "Fatal error: more than 100 entries in ignore_prefix_paths\n");
+    exit(1);
+  }
+}
+
+void CDE_add_ignore_exact_path(char* p) {
+  assert(ignore_exact_paths[ignore_exact_paths_ind] == NULL);
+  ignore_exact_paths[ignore_exact_paths_ind] = strdup(p);
+  ignore_exact_paths_ind++;
+
+  fprintf(stderr, "CDE ignoring exact path: '%s'\n",
+          ignore_exact_paths[ignore_exact_paths_ind - 1]);
+
+  if (ignore_exact_paths_ind >= 100) {
+    fprintf(stderr, "Fatal error: more than 100 entries in ignore_exact_paths\n");
+    exit(1);
+  }
+}
+
 
 // initialize ignore_exact_paths and ignore_prefix_paths based on
 // the cde.ignore file, which has the grammar:
@@ -2021,18 +2067,15 @@ void CDE_init_ignore_paths() {
 
     char* p;
     char is_first_token = 1;
-    char** array_to_set = NULL;
-    int* p_index = NULL;
+    char set_ignore_exact_path = 0;
 
     for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
       if (is_first_token) {
         if (strcmp(p, "ignore_exact") == 0) {
-          array_to_set = ignore_exact_paths;
-          p_index = &ignore_exact_paths_ind;
+          set_ignore_exact_path = 1;
         }
         else if (strcmp(p, "ignore_prefix") == 0) {
-          array_to_set = ignore_prefix_paths;
-          p_index = &ignore_prefix_paths_ind;
+          set_ignore_exact_path = 0;
         }
         else {
           fprintf(stderr, "Fatal error in cde.ignore: unrecognized token '%s'\n", p);
@@ -2042,26 +2085,15 @@ void CDE_init_ignore_paths() {
         is_first_token = 0;
       }
       else {
-        if (*p_index >= 100) {
-          fprintf(stderr, "Fatal error: more than 100 entries in cde.ignore\n");
-          exit(1);
+        if (set_ignore_exact_path) {
+          CDE_add_ignore_exact_path(p);
         }
-        assert(array_to_set[*p_index] == NULL);
-        array_to_set[*p_index] = strdup(p);
-        (*p_index)++;
+        else {
+          CDE_add_ignore_prefix_path(p);
+        }
         break;
       }
     }
   }
-
-  // print for sanity checking
-  int i;
-  for (i = 0; i < ignore_exact_paths_ind; i++) {
-    fprintf(stderr, "CDE ignoring exact path: '%s'\n", ignore_exact_paths[i]);
-  }
-  for (i = 0; i < ignore_prefix_paths_ind; i++) {
-    fprintf(stderr, "CDE ignoring paths starting with: '%s'\n", ignore_prefix_paths[i]);
-  }
-
 }
 
