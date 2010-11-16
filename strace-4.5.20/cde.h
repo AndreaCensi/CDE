@@ -29,6 +29,8 @@
 #include <sys/stat.h>
 #include <sys/param.h>
 
+#include <errno.h>
+
 #include "defs.h"
 
 // to shut up gcc warnings without causing nasty #include conflicts
@@ -41,8 +43,9 @@ int shmctl(int shmid, int cmd, struct shmid_ds *buf);
 
 // like an assert except that it always fires
 #define EXITIF(x) do { \
-  if (x) { \
-    fprintf(stderr, "Fatal error in %s [%s:%d]\n", __FUNCTION__, __FILE__, __LINE__); \
+  if (x) { \  
+    fprintf(stderr, "Fatal error in %s [%s:%d]: %s\n", __FUNCTION__, __FILE__, \
+        __LINE__,strerror(errno)); \
     exit(1); \
   } \
 } while(0)
