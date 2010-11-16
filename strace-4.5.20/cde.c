@@ -929,7 +929,21 @@ done
     // libc is so dumb ... strtok() alters its argument in an un-kosher way
     tmp = strdup(script_command);
     char* p = strtok(tmp, " ");
-    ld_linux_filename = find_ELF_program_interpreter(p);
+
+    // to have find_ELF_program_interpreter succeed, we might need to
+    // redirect the path inside CDE_ROOT_DIR:
+    char* script_command_filename = NULL;
+    if (CDE_exec_mode) {
+      script_command_filename = redirect_filename_into_cderoot(p, tcp->current_dir);
+    }
+
+    if (!script_command_filename) {
+      script_command_filename = strdup(p);
+    }
+
+    ld_linux_filename = find_ELF_program_interpreter(script_command_filename);
+
+    free(script_command_filename);
     free(tmp);
 
     if (!ld_linux_filename) {
