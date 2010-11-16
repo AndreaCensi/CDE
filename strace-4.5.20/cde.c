@@ -175,20 +175,26 @@ static void make_mirror_dirs_in_cde_package(char* original_abspath, int pop_one)
   int i;
   for (i = 1; i <= p->depth; i++) {
     char* dn = path2str(p, i);
+    char* dn_within_package = prepend_cderoot(dn);
 
-    struct stat dn_stat;
-    if (lstat(dn, &dn_stat) == 0) { // this does NOT follow the symlink
-      char is_symlink = S_ISLNK(dn_stat.st_mode);
-      if (is_symlink) {
-        create_symlink_in_cde_root(dn, NULL, 0);
-      }
-      else {
-        assert(S_ISDIR(dn_stat.st_mode));
-        char* dn_within_package = prepend_cderoot(dn);
-        mkdir(dn_within_package, 0777);
-        free(dn_within_package);
+    // only do this if dn_within_package doesn't already exist
+    // (to prevent possible infinite loops)
+    struct stat already_exists_stat;
+    if (lstat(dn_within_package, &already_exists_stat) != 0) {
+      struct stat dn_stat;
+      if (lstat(dn, &dn_stat) == 0) { // this does NOT follow the symlink
+        char is_symlink = S_ISLNK(dn_stat.st_mode);
+        if (is_symlink) {
+          create_symlink_in_cde_root(dn, NULL, 0);
+        }
+        else {
+          assert(S_ISDIR(dn_stat.st_mode));
+          mkdir(dn_within_package, 0777);
+        }
       }
     }
+
+    free(dn_within_package);
     free(dn);
   }
   delete_path(p);
