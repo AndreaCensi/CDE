@@ -74,6 +74,8 @@ extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
 extern char* find_ELF_program_interpreter(char * file_name); // from ../readelf-mini/libreadelf-mini.a
 
+extern void path_pop(struct path* p);
+
 
 // returns a component within real_pwd that represents the part within
 // cde_pseudo_root_dir
@@ -174,20 +176,23 @@ static void make_mirror_dirs_in_cde_package(char* original_abspath, int pop_one)
   for (i = 1; i <= p->depth; i++) {
     char* dn = path2str(p, i);
 
-    char* dn_within_package = prepend_cderoot(dn);
-
-    //printf("make_mirror_dirs_in_cde_package:\n  '%s'\n  '%s'\n",
-    //       dn, dn_within_package);
-
-    mkdir(dn_within_package, 0777);
-
-    free(dn_within_package);
+    struct stat dn_stat;
+    if (lstat(dn, &dn_stat) == 0) { // this does NOT follow the symlink
+      char is_symlink = S_ISLNK(dn_stat.st_mode);
+      if (is_symlink) {
+        create_symlink_in_cde_root(dn, NULL, 0);
+      }
+      else {
+        assert(S_ISDIR(dn_stat.st_mode));
+        char* dn_within_package = prepend_cderoot(dn);
+        mkdir(dn_within_package, 0777);
+        free(dn_within_package);
+      }
+    }
     free(dn);
   }
   delete_path(p);
 }
-
-
 
 
 // ignore these special paths:
