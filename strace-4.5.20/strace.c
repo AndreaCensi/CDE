@@ -53,6 +53,8 @@
 #include <limits.h>
 #include <dirent.h>
 
+#include <sys/mman.h> // pgbovine
+
 #ifdef LINUX
 # include <asm/unistd.h>
 # if defined __NR_tgkill
@@ -1018,12 +1020,66 @@ main(int argc, char *argv[])
 
   // pgbovine - ccache compiler cache causes weird issues with
   // non-reproducibility, so simply disable it
+  //
+  // TODO: is this still true?  maybe we don't need this hack anymore
   setenv("CCACHE_DISABLE", "1", 1);
 
   if (CDE_exec_mode) {
     CDE_init_pseudo_root_dir();
 
+    static char cde_full_environment_abspath[MAXPATHLEN];
+    strcpy(cde_full_environment_abspath, cde_pseudo_root_dir);
+    strcat(cde_full_environment_abspath, "/../cde.full-environment");
+
+    struct stat env_file_stat;
+    if (stat(cde_full_environment_abspath, &env_file_stat)) {
+      perror(cde_full_environment_abspath);
+      cleanup();
+      exit(1);
+    }
+
+    int full_environment_fd = open(cde_full_environment_abspath, O_RDONLY);
+
+    void* environ_start =
+      (char*)mmap(0, env_file_stat.st_size, PROT_READ, MAP_PRIVATE, full_environment_fd, 0);
+
+    char* environ_str = (char*)environ_start;
+    while (*environ_str) {
+      int environ_strlen = strlen(environ_str);
+
+      char* cur = strdup(environ_str); // strtok needs to mutate
+      char* name = NULL;
+      char* val = NULL;
+      char* p;
+      int count = 0;
+      for (p = strtok(cur, "="); p; p = strtok(NULL, "=")) {
+        if (count == 0) {
+          name = strdup(p);
+        }
+        else {
+          val = strdup(p);
+          break;
+        }
+        count++;
+      }
+
+      setenv(name, val, 1); // do it!!!
+
+      if (name) free(name);
+      if (val) free(val);
+      free(cur);
+
+      // every string in cde_full_environment_abspath is
+      // null-terminated, so this advances to the next string
+      environ_str += (environ_strlen + 1);
+    }
+
+    munmap(environ_start, env_file_stat.st_size);
+    close(full_environment_fd);
+
     // load environment variables from "$cde_pseudo_root_dir/../cde.environment" file
+    // THIS IS DEPRECATED --- we are now using cde.full-environment instead
+    /*
     static char cde_environment_abspath[MAXPATHLEN];
     strcpy(cde_environment_abspath, cde_pseudo_root_dir);
     strcat(cde_environment_abspath, "/../cde.environment");
@@ -1090,6 +1146,7 @@ main(int argc, char *argv[])
       }
     }
     free(line);
+    */
   }
   else {
     // pgbovine - copy 'cde' executable to $CDE_PACKAGE_DIR and rename
@@ -1124,8 +1181,10 @@ main(int argc, char *argv[])
     fclose(log_f);
 
 
+    /*
     // save current value of selected environment vars to
     // "$CDE_PACKAGE_DIR/cde.environment" file
+    // THIS IS DEPRECATED --- we are now using cde.full-environment instead
     FILE* envF = fopen(CDE_PACKAGE_DIR "/cde.environment", "w");
     if (!envF) {
       perror(CDE_PACKAGE_DIR "/cde.environment");
@@ -1149,12 +1208,15 @@ main(int argc, char *argv[])
     fputs(getenv("PWD"), envF);
 
     fclose(envF);
+    */
 
     CDE_create_path_symlink_dirs();
 
     CDE_create_toplevel_symlink_dirs();
-  }
 
+    // copy /proc/self/environ to capture the FULL set of environment vars
+    copy_file("/proc/self/environ", CDE_PACKAGE_DIR "/cde.full-environment");
+  }
 
 
 	/* STARTUP_CHILD must be called before the signal handlers get
