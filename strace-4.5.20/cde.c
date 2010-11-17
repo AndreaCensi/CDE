@@ -729,12 +729,50 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
   assert(tcp->opened_filename);
  
   if (CDE_exec_mode) {
-    //printf("end %s %s (%d)\n", syscall_name, tcp->opened_filename, tcp->u_rval);
     // empty
   }
   else {
     if (((success_type == 0) && (tcp->u_rval == 0)) ||
         ((success_type == 1) && (tcp->u_rval >= 0))) {
+      copy_file_into_cde_root(tcp->opened_filename, tcp->current_dir);
+    }
+  }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+
+void CDE_end_readlink(struct tcb* tcp) {
+  assert(tcp->opened_filename);
+ 
+  if (CDE_exec_mode) {
+    if (tcp->u_rval >= 0) {
+      // super hack!  if the program is trying to access the special
+      // /proc/self/exe file, return perceived_program_fullpath if
+      // available, or else it will erroneously return the path
+      // to the dynamic linker (e.g., ld-linux.so.2).
+      //
+      // programs like 'java' rely on the value of /proc/self/exe
+      // being the true path to the executable
+      if ((strcmp(tcp->opened_filename, "/proc/self/exe") == 0) &&
+          tcp->perceived_program_fullpath) {
+        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[1],
+                        tcp->perceived_program_fullpath,
+                        strlen(tcp->perceived_program_fullpath) + 1);
+      }
+      // if the program tries to read /proc/self/cwd, then treat it like
+      // a CDE_end_getcwd call, returning a fake cwd:
+      else if (strcmp(tcp->opened_filename, "/proc/self/cwd") == 0) {
+        // copied from CDE_end_getcwd
+        char* sandboxed_pwd = extract_sandboxed_pwd(tcp->current_dir);
+        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[1],
+                        sandboxed_pwd, strlen(sandboxed_pwd) + 1);
+      }
+    }
+  }
+  else {
+    if (tcp->u_rval >= 0) {
       copy_file_into_cde_root(tcp->opened_filename, tcp->current_dir);
     }
   }
@@ -1006,12 +1044,21 @@ done
 
       int script_command_num_tokens = 0;
 
+      // set this ONCE on the first token
+      tcp->perceived_program_fullpath = NULL;
+
       // tokenize script_command into tokens, and insert them into argv
       // TODO: this will fail if the shebang line contains file paths
       // with spaces, quotes, or other weird characters!
       char* p;
       for (p = strtok(script_command, " "); p; p = strtok(NULL, " ")) {
         //printf("  token = %s\n", p);
+
+        // set to the first token!
+        if (!tcp->perceived_program_fullpath) {
+          tcp->perceived_program_fullpath = strdup(p);
+        }
+
         strcpy(cur_loc, p);
         script_command_token_starts[script_command_num_tokens] = cur_loc;
 
@@ -1110,6 +1157,8 @@ done
       new_argv[0] = (char*)tcp->childshm;
       // points to original program name (full path)
       new_argv[1] = (char*)tcp->u_arg[0];
+
+      tcp->perceived_program_fullpath = strcpy_from_child(tcp, tcp->u_arg[0]);
 
       // now populate argv[1:] directly from child's original space
       // (original arguments)
@@ -1942,6 +1991,16 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
     // otherwise create fresh fields derived from master (cde) process
     getcwd(tcp->current_dir, MAXPATHLEN);
     //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
+  }
+
+
+  // it's possible that tcp->perceived_program_fullpath has already been
+  // set, and if so, don't mess with it.  only inherit from parent if it
+  // hasn't been set yet (TODO: I don't fully understand the rationale
+  // for this, but it seems to work in practice so far)
+  if (!tcp->perceived_program_fullpath && tcp->parent) {
+    // aliased, so don't mutate or free
+    tcp->perceived_program_fullpath = tcp->parent->perceived_program_fullpath;
   }
 }
 

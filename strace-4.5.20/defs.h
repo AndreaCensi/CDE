@@ -362,6 +362,18 @@ struct tcb {
   // if non-null, just malloc a block of size MAXPATHLEN and strcpy into it
   char* current_dir; // REAL current directory of this child process
 
+  // if we prepended the dynamic linker to a program name to invoke it,
+  // then set this to the full program path from the original execution,
+  // which is what /proc/self/exe should return when readlink() is
+  // called on it
+  //
+  // (only valid in CDE_exec_mode, does not contain the true path
+  // within cde-root/ ... contains what the program 'perceives' is its
+  // path from the original run)
+  //
+  // inherited from parent during fork()
+  char* perceived_program_fullpath;
+
   // Fields pertaining to the shared memory segment,
   // which is only valid when CDE_exec_mode option is 1
   int shmid;
