@@ -290,6 +290,9 @@ char* path2str(struct path* path, int depth) {
 }
 
 
+// THIS FUNCTION IS DEPRECATED ...
+// use make_mirror_dirs_in_cde_package() instead
+#ifdef PGBOVINE_COMMENT
 // emulate "mkdir -p" functionality
 // if pop_one is non-zero, then pop last element
 // before doing "mkdir -p"
@@ -310,6 +313,7 @@ void mkdir_recursive(char* fullpath, int pop_one) {
   }
   delete_path(p);
 }
+#endif // PGBOVINE_COMMENT
 
 
 // return 1 iff the absolute path of filename is within target_dir

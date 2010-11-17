@@ -74,6 +74,8 @@ extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 
 extern char* find_ELF_program_interpreter(char * file_name); // from ../readelf-mini/libreadelf-mini.a
 
+extern void path_pop(struct path* p);
+
 
 // returns a component within real_pwd that represents the part within
 // cde_pseudo_root_dir
@@ -153,6 +155,49 @@ char* create_abspath_within_cderoot(char* path) {
     assert(IS_ABSPATH(ret));
     return ret;
   }
+}
+
+
+// original_abspath must be an absolute path
+// create all the corresponding 'mirror' directories within
+// cde-package/cde-root/, MAKING SURE TO CREATE DIRECTORY SYMLINKS
+// when necessary (sort of emulate "mkdir -p" functionality)
+// if pop_one is non-zero, then pop last element before doing "mkdir -p"
+static void make_mirror_dirs_in_cde_package(char* original_abspath, int pop_one) {
+  // use a sneaky new_path_internal call so that we can accept relative
+  // paths in fullpath
+  struct path* p = new_path_from_abspath(original_abspath);
+
+  if (pop_one) {
+    path_pop(p); // e.g., ignore filename portion to leave just the dirname
+  }
+
+  int i;
+  for (i = 1; i <= p->depth; i++) {
+    char* dn = path2str(p, i);
+    char* dn_within_package = prepend_cderoot(dn);
+
+    // only do this if dn_within_package doesn't already exist
+    // (to prevent possible infinite loops)
+    struct stat already_exists_stat;
+    if (lstat(dn_within_package, &already_exists_stat) != 0) {
+      struct stat dn_stat;
+      if (lstat(dn, &dn_stat) == 0) { // this does NOT follow the symlink
+        char is_symlink = S_ISLNK(dn_stat.st_mode);
+        if (is_symlink) {
+          create_symlink_in_cde_root(dn, NULL, 0);
+        }
+        else {
+          assert(S_ISDIR(dn_stat.st_mode));
+          mkdir(dn_within_package, 0777);
+        }
+      }
+    }
+
+    free(dn_within_package);
+    free(dn);
+  }
+  delete_path(p);
 }
 
 
@@ -278,7 +323,6 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
     }
   }
 
-
   // finally, 'copy' filename_abspath over to dst_path
 
   // if it's a symlink, copy both it and its target
@@ -290,7 +334,8 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
     if (S_ISREG(filename_stat.st_mode)) { // regular file
       // create all the directories leading up to it, to make sure file
       // copying/hard-linking will later succeed
-      mkdir_recursive(dst_path, 1);
+      //mkdir_recursive(dst_path, 1);
+      make_mirror_dirs_in_cde_package(filename_abspath, 1);
 
       // regular file, simple common case :)
       // 1.) try a hard link for efficiency
@@ -311,7 +356,8 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
     }
     else if (S_ISDIR(filename_stat.st_mode)) { // directory or symlink to directory
       // do a "mkdir -p filename" after redirecting it into cde-root/
-      mkdir_recursive(dst_path, 0);
+      //mkdir_recursive(dst_path, 0);
+      make_mirror_dirs_in_cde_package(filename_abspath, 0);
     }
   }
 
@@ -883,7 +929,21 @@ done
     // libc is so dumb ... strtok() alters its argument in an un-kosher way
     tmp = strdup(script_command);
     char* p = strtok(tmp, " ");
-    ld_linux_filename = find_ELF_program_interpreter(p);
+
+    // to have find_ELF_program_interpreter succeed, we might need to
+    // redirect the path inside CDE_ROOT_DIR:
+    char* script_command_filename = NULL;
+    if (CDE_exec_mode) {
+      script_command_filename = redirect_filename_into_cderoot(p, tcp->current_dir);
+    }
+
+    if (!script_command_filename) {
+      script_command_filename = strdup(p);
+    }
+
+    ld_linux_filename = find_ELF_program_interpreter(script_command_filename);
+
+    free(script_command_filename);
     free(tmp);
 
     if (!ld_linux_filename) {
@@ -1314,7 +1374,8 @@ void CDE_end_fchdir(struct tcb* tcp) {
       char* redirected_path =
         redirect_filename_into_cderoot(tcp->current_dir, tcp->current_dir);
       if (redirected_path) {
-        mkdir_recursive(redirected_path, 0);
+        //mkdir_recursive(redirected_path, 0);
+        make_mirror_dirs_in_cde_package(tcp->current_dir, 0);
         free(redirected_path);
       }
     }
@@ -1335,12 +1396,9 @@ void CDE_end_mkdir(struct tcb* tcp) {
   else {
     // always mkdir even if the call fails
     // (e.g., because the directory already exists)
-    char* redirected_path =
-      redirect_filename_into_cderoot(tcp->opened_filename, tcp->current_dir);
-    if (redirected_path) {
-      mkdir_recursive(redirected_path, 0);
-      free(redirected_path);
-    }
+    char* dirname_abspath = canonicalize_path(tcp->opened_filename, tcp->current_dir);
+    make_mirror_dirs_in_cde_package(dirname_abspath, 0);
+    free(dirname_abspath);
   }
 
   free(tcp->opened_filename);
@@ -1772,7 +1830,8 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
 
   char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
   // make sure parent directories exist
-  mkdir_recursive(symlink_loc_in_package, 1);
+  //mkdir_recursive(symlink_loc_in_package, 1);
+  make_mirror_dirs_in_cde_package(filename_abspath, 1);
 
   char* symlink_target_abspath = NULL;
 
@@ -1818,17 +1877,17 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
 
   // ok, let's get the absolute path without any '..' or '.' funniness
   // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
-  char* symlink_dst_tmp_path = canonicalize_abspath(symlink_target_abspath);
-  char* symlink_dst_abspath = prepend_cderoot(symlink_dst_tmp_path);
+  char* symlink_dst_original_path = canonicalize_abspath(symlink_target_abspath);
+  char* symlink_dst_abspath = prepend_cderoot(symlink_dst_original_path);
   //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
   //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
-  free(symlink_dst_tmp_path);
 
 
   if (is_regular_file) { // symlink to regular file
     // ugh, this is getting really really gross, mkdir all dirs stated in
     // symlink_dst_abspath if they don't yet exist
-    mkdir_recursive(symlink_dst_abspath, 1);
+    //mkdir_recursive(symlink_dst_abspath, 1);
+    make_mirror_dirs_in_cde_package(symlink_dst_original_path, 1);
 
     // do a realpath_strdup to grab the ACTUAL file that
     // symlink_target_abspath refers to, following any other symlinks
@@ -1854,12 +1913,14 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
   }
   else { // symlink to directory
     // make sure the target directory actually exists
-    mkdir_recursive(symlink_dst_abspath, 0);
+    //mkdir_recursive(symlink_dst_abspath, 0);
+    make_mirror_dirs_in_cde_package(symlink_dst_original_path, 0);
   }
 
   free(symlink_loc_in_package);
   free(symlink_target_abspath);
   free(symlink_dst_abspath);
+  free(symlink_dst_original_path);
   free(filename_abspath_copy);
   free(orig_symlink_target);
   free(filename_abspath);
@@ -1943,7 +2004,9 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
   char* progname_redirected =
     redirect_filename_into_cderoot(cde_script_name, cde_starting_pwd);
 
-  mkdir_recursive(progname_redirected, 1); // make sure directory exists :)
+  // make sure directory exists :)
+  //mkdir_recursive(progname_redirected, 1);
+  make_mirror_dirs_in_cde_package(cde_starting_pwd, 0);
 
 
   // this is sort of tricky.  we need to insert in a bunch of ../ so
