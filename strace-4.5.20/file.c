@@ -41,6 +41,7 @@ extern void CDE_begin_file_unlink(struct tcb* tcp);
 
 extern void CDE_begin_file_link(struct tcb* tcp);
 extern void CDE_end_file_link(struct tcb* tcp);
+extern void CDE_end_readlink(struct tcb* tcp);
 extern void CDE_begin_file_symlink(struct tcb* tcp);
 extern void CDE_end_file_symlink(struct tcb* tcp);
 extern void CDE_begin_file_rename(struct tcb* tcp);
@@ -2156,7 +2157,14 @@ int
 sys_readlink(struct tcb *tcp)
 {
   // pgbovine
-  CDE_standard_fileop_macro(tcp, 1); // remember success_type = 1 here
+  //CDE_standard_fileop_macro(tcp, 1); // remember success_type = 1 here
+  if (entering(tcp)) {
+    CDE_begin_standard_fileop(tcp, __FUNCTION__);
+  }
+  else {
+    CDE_end_readlink(tcp);
+  }
+
   return 0;
 
 	//return decode_readlink(tcp, 0);

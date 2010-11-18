@@ -53,6 +53,8 @@
 #include <limits.h>
 #include <dirent.h>
 
+#include <sys/mman.h> // pgbovine
+
 #ifdef LINUX
 # include <asm/unistd.h>
 # if defined __NR_tgkill
@@ -100,11 +102,12 @@ extern void CDE_init_tcb_dir_fields(struct tcb* tcp);
 extern void CDE_init_pseudo_root_dir(void);
 extern void CDE_add_ignore_prefix_path(char* p);
 extern void CDE_add_ignore_exact_path(char* p);
+extern void CDE_add_ignore_envvar(char* p);
 extern void CDE_create_convenience_scripts(char** argv, int optind);
 extern char cde_starting_pwd[MAXPATHLEN];
 extern char cde_pseudo_root_dir[MAXPATHLEN];
 extern void CDE_init_ignore_paths(void);
-extern char CDE_no_default_path_ignores;
+extern void CDE_load_environment_vars(void);
 
 
 int debug = 0, followfork = 1; // pgbovine - turn on followfork by default
@@ -196,20 +199,23 @@ int exitval;
   if (CDE_exec_mode) {
     fprintf(ofp,
             "CDE: automatic packaging of Code, Data, and Environment\n"
-            "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n\n"
+            "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n"
+            "http://www.stanford.edu/~pgbovine/cde.html\n\n"
             "usage: cde-exec [options] [command within cde-root/ to run]\n");
   }
   else {
     fprintf(ofp,
             "CDE: automatic packaging of Code, Data, and Environment\n"
-            "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n\n"
+            "Copyright 2010 Philip Guo (pg@cs.stanford.edu)\n"
+            "http://www.stanford.edu/~pgbovine/cde.html\n\n"
             "usage: cde [options] [command to run and package]\n");
   }
 
   fprintf(ofp, "\nOptions\n");
-  fprintf(ofp, "  -i <path prefix> : Ignore all paths with this prefix\n");
-  fprintf(ofp, "  -I <full path>   : Ignore exact path\n");
-  fprintf(ofp, "  -n : Do not ignore any paths except for those you explicitly specify\n       (otherwise CDE ignores weird dirs like /dev, /proc, /sys, etc.)\n");
+  fprintf(ofp, "  -i <path prefix> :     Ignore all paths with this prefix\n");
+  fprintf(ofp, "  -I <full path>   :     Ignore exact path\n");
+  fprintf(ofp, "  -E <environment var> : Do NOT use this environment var's value from cde.full-environment");
+
 	exit(exitval);
 }
 
@@ -765,13 +771,57 @@ main(int argc, char *argv[])
   // initialization work later in this function
   if (strcmp(basename(progname), "cde-exec") == 0) {
     CDE_exec_mode = 1;
+
+    // must do this before running CDE_init_ignore_paths()
+    CDE_init_pseudo_root_dir();
   }
   else {
     CDE_exec_mode = 0;
 
     mkdir(CDE_PACKAGE_DIR, 0777);
     mkdir(CDE_ROOT_DIR, 0777);
+
+    // if cde.ignore doesn't yet exist, create it in pwd and seed it
+    // with default values that are useful to ignore in practice
+    //
+    // do this BEFORE CDE_init_ignore_paths() so that we pick up those
+    // ignored values
+    struct stat cde_ignore_stat;
+    if (stat("cde.ignore", &cde_ignore_stat)) {
+      FILE* f = fopen("cde.ignore", "w");
+
+      // /dev, /proc, and /sys are special system directories with fake files
+      //
+      // /var contains 'volatile' temp files that change when system is
+      // running normally
+      //
+      // .Xauthority is used for X11 authentication via ssh, so we need to
+      // use the REAL version and not the one in cde-root/
+      //
+      // TODO: we're not ignoring .Xauthority anymore;
+      // hopefully that doesn't cause any problems
+      //
+      // ignore "/tmp" and "/tmp/*" since programs often put lots of
+      // session-specific stuff into /tmp so DO NOT track files within
+      // there, or else you will risk severely 'overfitting' and ruining
+      // portability across machines.  it's safe to assume that all Linux
+      // distros have a /tmp directory that anybody can write into
+      fputs("ignore_prefix=/dev/\n", f);
+      fputs("ignore_prefix=/proc/\n", f);
+      fputs("ignore_prefix=/sys/\n", f);
+      fputs("ignore_prefix=/var/\n", f);
+      fputs("ignore_prefix=/tmp/\n", f);
+      fputs("ignore_exact=/tmp\n", f);
+
+      // these environment vars might contribute to 'overfitting'
+      fputs("ignore_environment_var=DBUS_SESSION_BUS_ADDRESS\n", f);
+      fputs("ignore_environment_var=ORBIT_SOCKETDIR\n", f);
+      fputs("ignore_environment_var=SESSION_MANAGER\n", f);
+     
+      fclose(f);
+    }
   }
+
   // do this BEFORE initializing command-line options since -i and -I
   // will rely on it
   CDE_init_ignore_paths();
@@ -805,7 +855,7 @@ main(int argc, char *argv[])
 	qualify("verbose=all");
 	qualify("signal=all");
 	while ((c = getopt(argc, argv,
-		"+cCdfFhnqrtTvVxz"
+		"+cCdfFhqrtTvVxz"
 #ifndef USE_PROCFS
 		"D"
 #endif
@@ -854,10 +904,6 @@ main(int argc, char *argv[])
       // pgbovine - hijack for the '-I' option
       CDE_add_ignore_exact_path(optarg);
 			break;
-		case 'n':
-      CDE_no_default_path_ignores = 1;
-      fprintf(stderr, "CDE not ignoring any paths except for those you explicitly specify\n");
-      break;
 		case 'q':
 			qflag++;
 			break;
@@ -927,11 +973,15 @@ main(int argc, char *argv[])
 			username = strdup(optarg);
 			break;
 		case 'E':
+      // pgbovine - hijack for the '-E' option
+      CDE_add_ignore_envvar(optarg);
+      /*
 			if (putenv(optarg) < 0) {
 				fprintf(stderr, "%s: out of memory\n",
 					progname);
 				exit(1);
 			}
+      */
 			break;
 		default:
 			usage(stderr, 1);
@@ -1018,78 +1068,12 @@ main(int argc, char *argv[])
 
   // pgbovine - ccache compiler cache causes weird issues with
   // non-reproducibility, so simply disable it
+  //
+  // TODO: is this still true?  maybe we don't need this hack anymore
   setenv("CCACHE_DISABLE", "1", 1);
 
   if (CDE_exec_mode) {
-    CDE_init_pseudo_root_dir();
-
-    // load environment variables from "$cde_pseudo_root_dir/../cde.environment" file
-    static char cde_environment_abspath[MAXPATHLEN];
-    strcpy(cde_environment_abspath, cde_pseudo_root_dir);
-    strcat(cde_environment_abspath, "/../cde.environment");
-    FILE* envF = fopen(cde_environment_abspath, "r");
-    if (!envF) {
-      perror(cde_environment_abspath);
-      cleanup();
-      exit(1);
-    }
-
-    char* line = NULL;
-    size_t len = 0;
-    ssize_t read;
-    while ((read = getline(&line, &len, envF)) != -1) {
-      char* p;
-      char* stripped_str = NULL;
-
-      char is_path = 0;
-      char is_user = 0;
-      char is_home = 0;
-      char is_pwd  = 0;
-
-      for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
-        // find PATH environment variable
-        if (strcmp(p, "PATH") == 0) {
-          is_path = 1;
-          continue;
-        }
-        else if (strcmp(p, "USER") == 0) {
-          is_user = 1;
-          continue;
-        }
-        else if (strcmp(p, "HOME") == 0) {
-          is_home = 1;
-          continue;
-        }
-        else if (strcmp(p, "PWD") == 0) {
-          is_pwd = 1;
-          continue;
-        }
-
-        if (is_path || is_user || is_home || is_pwd) {
-          stripped_str = strdup(p);
-          if (stripped_str[strlen(stripped_str) - 1] == '\n') {
-            stripped_str[strlen(stripped_str) - 1] = '\0';
-          }
-
-          if (is_path) {
-            setenv("PATH", stripped_str, 1);
-          }
-          else if (is_user) {
-            setenv("USER", stripped_str, 1);
-          }
-          else if (is_home) {
-            setenv("HOME", stripped_str, 1);
-          }
-          else if (is_pwd) {
-            setenv("PWD", stripped_str, 1);
-          }
-
-          free(stripped_str);
-          break;
-        }
-      }
-    }
-    free(line);
+    CDE_load_environment_vars();
   }
   else {
     // pgbovine - copy 'cde' executable to $CDE_PACKAGE_DIR and rename
@@ -1108,53 +1092,29 @@ main(int argc, char *argv[])
     FILE* log_f;
     if (stat(CDE_PACKAGE_DIR "/cde.log", &tmp)) {
       log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "w");
-      fprintf(log_f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
+      fprintf(log_f, "cd '" CDE_ROOT_NAME "%s'", cde_starting_pwd);
       fputc('\n', log_f);
     }
     else {
       log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
     }
 
-    fprintf(log_f, "./%s.cde", basename(argv[optind]));
+    fprintf(log_f, "'./%s.cde'", basename(argv[optind]));
     int i;
     for (i = optind + 1; argv[i] != NULL; i++) {
-      fprintf(log_f, " %s", argv[i]);
+      fprintf(log_f, " '%s'", argv[i]); // add quotes for accuracy
     }
     fputc('\n', log_f);
     fclose(log_f);
 
-
-    // save current value of selected environment vars to
-    // "$CDE_PACKAGE_DIR/cde.environment" file
-    FILE* envF = fopen(CDE_PACKAGE_DIR "/cde.environment", "w");
-    if (!envF) {
-      perror(CDE_PACKAGE_DIR "/cde.environment");
-      cleanup();
-      exit(1);
-    }
-
-    fputs("PATH=", envF);
-    fputs(getenv("PATH"), envF);
-
-    fputs("\n", envF);
-    fputs("USER=", envF);
-    fputs(getenv("USER"), envF);
-
-    fputs("\n", envF);
-    fputs("HOME=", envF);
-    fputs(getenv("HOME"), envF);
-
-    fputs("\n", envF);
-    fputs("PWD=", envF);
-    fputs(getenv("PWD"), envF);
-
-    fclose(envF);
-
     CDE_create_path_symlink_dirs();
 
     CDE_create_toplevel_symlink_dirs();
-  }
 
+
+    // copy /proc/self/environ to capture the FULL set of environment vars
+    copy_file("/proc/self/environ", CDE_PACKAGE_DIR "/cde.full-environment");
+  }
 
 
 	/* STARTUP_CHILD must be called before the signal handlers get

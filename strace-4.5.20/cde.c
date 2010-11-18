@@ -31,10 +31,6 @@ __asm__(".symver shmctl,shmctl@GLIBC_2.0"); // hack to eliminate glibc 2.2 depen
 // 0 for tracing regular execution
 char CDE_exec_mode;
 
-// if this is 1, the do not ignore ANY paths by default
-// activated by the -n option
-char CDE_no_default_path_ignores = 0;
-
 static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename, char* child_current_pwd);
@@ -46,8 +42,7 @@ static int ignore_path(char* filename);
 
 static char* redirect_filename_into_cderoot(char* filename, char* child_current_pwd);
 static void memcpy_to_child(int pid, char* dst_child, char* src, int size);
-static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
-                                       char is_regular_file);
+static void create_symlink_in_cde_root(char* filename, char* child_current_pwd);
 
 // the true pwd of the cde executable AT THE START of execution
 char cde_starting_pwd[MAXPATHLEN];
@@ -58,6 +53,8 @@ static char* ignore_exact_paths[100];
 int ignore_exact_paths_ind = 0;
 static char* ignore_prefix_paths[100];
 int ignore_prefix_paths_ind = 0;
+static char* ignore_envvars[100]; // each element should be an environment variable to ignore
+int ignore_envvars_ind = 0;
 
 // the absolute path to the cde-root/ directory, since that will be
 // where our fake filesystem starts. e.g., if cde_starting_pwd is
@@ -185,7 +182,7 @@ static void make_mirror_dirs_in_cde_package(char* original_abspath, int pop_one)
       if (lstat(dn, &dn_stat) == 0) { // this does NOT follow the symlink
         char is_symlink = S_ISLNK(dn_stat.st_mode);
         if (is_symlink) {
-          create_symlink_in_cde_root(dn, NULL, 0);
+          create_symlink_in_cde_root(dn, NULL);
         }
         else {
           assert(S_ISDIR(dn_stat.st_mode));
@@ -209,30 +206,6 @@ static int ignore_path(char* filename) {
     return 1;
   }
 
-  if (!CDE_no_default_path_ignores) {
-    // /dev, /proc, and /sys are special system directories with fake files
-    //
-    // /var contains 'volatile' temp files that change when system is
-    // running normally
-    //
-    // .Xauthority is used for X11 authentication via ssh, so we need to
-    // use the REAL version and not the one in cde-root/
-    //
-    // ignore "/tmp" and "/tmp/*" since programs often put lots of
-    // session-specific stuff into /tmp so DO NOT track files within
-    // there, or else you will risk severely 'overfitting' and ruining
-    // portability across machines.  it's safe to assume that all Linux
-    // distros have a /tmp directory that anybody can write into
-    if ((strncmp(filename, "/dev/", 5) == 0) ||
-        (strncmp(filename, "/proc/", 6) == 0) ||
-        (strncmp(filename, "/sys/", 5) == 0) ||
-        (strncmp(filename, "/var/", 5) == 0) ||
-        (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
-        (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
-        (strcmp(basename(filename), ".Xauthority") == 0)) {
-      return 1;
-    }
-  }
 
   // custom ignore paths, as specified in cde.ignore
   int i;
@@ -327,8 +300,7 @@ static void copy_file_into_cde_root(char* filename, char* child_current_pwd) {
 
   // if it's a symlink, copy both it and its target
   if (is_symlink) {
-    create_symlink_in_cde_root(filename, child_current_pwd,
-                               S_ISREG(filename_stat.st_mode));
+    create_symlink_in_cde_root(filename, child_current_pwd);
   }
   else {
     if (S_ISREG(filename_stat.st_mode)) { // regular file
@@ -729,12 +701,50 @@ void CDE_end_standard_fileop(struct tcb* tcp, const char* syscall_name,
   assert(tcp->opened_filename);
  
   if (CDE_exec_mode) {
-    //printf("end %s %s (%d)\n", syscall_name, tcp->opened_filename, tcp->u_rval);
     // empty
   }
   else {
     if (((success_type == 0) && (tcp->u_rval == 0)) ||
         ((success_type == 1) && (tcp->u_rval >= 0))) {
+      copy_file_into_cde_root(tcp->opened_filename, tcp->current_dir);
+    }
+  }
+
+  free(tcp->opened_filename);
+  tcp->opened_filename = NULL;
+}
+
+
+void CDE_end_readlink(struct tcb* tcp) {
+  assert(tcp->opened_filename);
+ 
+  if (CDE_exec_mode) {
+    if (tcp->u_rval >= 0) {
+      // super hack!  if the program is trying to access the special
+      // /proc/self/exe file, return perceived_program_fullpath if
+      // available, or else it will erroneously return the path
+      // to the dynamic linker (e.g., ld-linux.so.2).
+      //
+      // programs like 'java' rely on the value of /proc/self/exe
+      // being the true path to the executable
+      if ((strcmp(tcp->opened_filename, "/proc/self/exe") == 0) &&
+          tcp->perceived_program_fullpath) {
+        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[1],
+                        tcp->perceived_program_fullpath,
+                        strlen(tcp->perceived_program_fullpath) + 1);
+      }
+      // if the program tries to read /proc/self/cwd, then treat it like
+      // a CDE_end_getcwd call, returning a fake cwd:
+      else if (strcmp(tcp->opened_filename, "/proc/self/cwd") == 0) {
+        // copied from CDE_end_getcwd
+        char* sandboxed_pwd = extract_sandboxed_pwd(tcp->current_dir);
+        memcpy_to_child(tcp->pid, (char*)tcp->u_arg[1],
+                        sandboxed_pwd, strlen(sandboxed_pwd) + 1);
+      }
+    }
+  }
+  else {
+    if (tcp->u_rval >= 0) {
       copy_file_into_cde_root(tcp->opened_filename, tcp->current_dir);
     }
   }
@@ -750,78 +760,6 @@ void CDE_begin_execve(struct tcb* tcp) {
 
   assert(!tcp->opened_filename);
   tcp->opened_filename = strcpy_from_child(tcp, tcp->u_arg[0]);
-
-
-  /* This seems like a really ugly hack, but I can't think of a way
-     around it ... on some linux distros, /bin/bash sporadically crashes
-     once in a blue moon if you attempt to run it through
-     /lib/ld-linux.so.2 (but it works fine if you run it directly from
-     the shell).  here is an example from Xubuntu 9.10 (32-bit)
-
-$ while true; do /lib/ld-linux.so.2 /bin/bash -c "echo hello"; sleep 0.1; done > /dev/null
-Segmentation fault
-Segmentation fault
-Segmentation fault
-Segmentation fault
-/bin/bash: xmalloc: ../bash/variables.c:2150: cannot allocate 1187 bytes (0 bytes allocated)
-Segmentation fault
-Segmentation fault
-Segmentation fault
-Segmentation fault
-Segmentation fault
-Segmentation fault
-Segmentation fault
-Segmentation fault
-/bin/bash: xmalloc: ../bash/make_cmd.c:76: cannot allocate 240 bytes (0 bytes allocated)
-Segmentation fault
-[...]
-
-the command is simple enough: /lib/ld-linux.so.2 /bin/bash -c "echo hello"
-but when run enough times, it sporadically crashes
-
-Google for "xmalloc /bin/bash cannot allocate" for some random
-forum posts about these mysterious crashes
-e.g., http://lists.debian.org/debian-glibc/2004/09/msg00149.html
-
-note that if you just directly run:
-  /bin/bash -c "echo hello"
-repeatedly, there are NO segfaults.
-  
-
-thus, don't try invoking the dynamic linker on /bin/bash (this doesn't
-seem to be CDE's fault, because it crashes even when not running in CDE)
- 
-
-Update on 2010-11-05:
-
-A more direct way this problem manifests is if you run 'make' with this as the Makefile:
-
-'''
-all:
-        /lib64/ld-linux-x86-64.so.2 /bin/bash -c "echo hello"
-'''
-
-HA, it seems like someone reported this as a bug in Ubuntu:
-
-  http://www.mail-archive.com/ubuntu-bugs@lists.ubuntu.com/msg925663.html
-  https://bugs.launchpad.net/ubuntu/+source/make/+bug/249872
-
-Related bug report that hones in on /bin/bash itself:
-  https://bugs.launchpad.net/ubuntu/+source/bash/+bug/452175
-
-test case:
-
-#!/bin/sh
-while true
-do
-   /lib/ld-linux.so.2 /bin/bash /usr/bin/which apt-get
-done
-
-  */
-  if (strcmp(tcp->opened_filename, "/bin/bash") == 0) {
-    return;
-  }
-
 
   // only attempt to do the ld-linux.so.2 trick if tcp->opened_filename
   // is a valid executable file ... otherwise don't do
@@ -1006,12 +944,21 @@ done
 
       int script_command_num_tokens = 0;
 
+      // set this ONCE on the first token
+      tcp->perceived_program_fullpath = NULL;
+
       // tokenize script_command into tokens, and insert them into argv
       // TODO: this will fail if the shebang line contains file paths
       // with spaces, quotes, or other weird characters!
       char* p;
       for (p = strtok(script_command, " "); p; p = strtok(NULL, " ")) {
         //printf("  token = %s\n", p);
+
+        // set to the first token!
+        if (!tcp->perceived_program_fullpath) {
+          tcp->perceived_program_fullpath = strdup(p);
+        }
+
         strcpy(cur_loc, p);
         script_command_token_starts[script_command_num_tokens] = cur_loc;
 
@@ -1110,6 +1057,8 @@ done
       new_argv[0] = (char*)tcp->childshm;
       // points to original program name (full path)
       new_argv[1] = (char*)tcp->u_arg[0];
+
+      tcp->perceived_program_fullpath = strcpy_from_child(tcp, tcp->u_arg[0]);
 
       // now populate argv[1:] directly from child's original space
       // (original arguments)
@@ -1815,9 +1764,12 @@ void CDE_create_toplevel_symlink_dirs() {
 
 // create a matching symlink for filename within CDE_ROOT_DIR
 // and copy over the symlink's target into CDE_ROOT_DIR as well
-// Pre-req: f must be an absolute path to a symlink
-static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
-                                       char is_regular_file) {
+//
+// recursively handle cases where there are symlinks to other symlinks,
+// so that we need to create multiple levels of symlinks!
+//
+// Pre-req: filename must be an absolute path to a symlink
+static void create_symlink_in_cde_root(char* filename, char* child_current_pwd) {
   char* filename_abspath = canonicalize_path(filename, child_current_pwd);
 
   // target file must exist, so let's resolve its name
@@ -1825,10 +1777,11 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
 
   char* filename_abspath_copy = strdup(filename_abspath); // dirname() destroys its arg
   char* dir = dirname(filename_abspath_copy);
-
   char* dir_realpath = realpath_strdup(dir);
+  free(filename_abspath_copy);
 
   char* symlink_loc_in_package = prepend_cderoot(filename_abspath);
+
   // make sure parent directories exist
   //mkdir_recursive(symlink_loc_in_package, 1);
   make_mirror_dirs_in_cde_package(filename_abspath, 1);
@@ -1873,56 +1826,86 @@ static void create_symlink_in_cde_root(char* filename, char* child_current_pwd,
   }
   assert(symlink_target_abspath);
   assert(IS_ABSPATH(symlink_target_abspath));
+
   free(dir_realpath);
-
-  // ok, let's get the absolute path without any '..' or '.' funniness
-  // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
-  char* symlink_dst_original_path = canonicalize_abspath(symlink_target_abspath);
-  char* symlink_dst_abspath = prepend_cderoot(symlink_dst_original_path);
-  //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
-  //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
+  free(symlink_loc_in_package);
+  free(orig_symlink_target);
 
 
-  if (is_regular_file) { // symlink to regular file
-    // ugh, this is getting really really gross, mkdir all dirs stated in
-    // symlink_dst_abspath if they don't yet exist
-    //mkdir_recursive(symlink_dst_abspath, 1);
-    make_mirror_dirs_in_cde_package(symlink_dst_original_path, 1);
+  struct stat symlink_target_stat;
+  if (lstat(symlink_target_abspath, &symlink_target_stat)) { // lstat does NOT follow symlinks
+    fprintf(stderr, "CDE WARNING: symlink_target_abspath ('%s') cannot be found\n", symlink_target_abspath);
+    return; // leads to memory leak, but oh well
+  }
 
-    // do a realpath_strdup to grab the ACTUAL file that
-    // symlink_target_abspath refers to, following any other symlinks
-    // present.  this means that there will be at most ONE layer of
-    // symlinks within cde-root/; all subsequent symlink layers are
-    // 'compressed' by this call ... it doesn't perfectly mimic the
-    // original filesystem, but it should work well in practice
-    char* src_file = realpath_strdup(symlink_target_abspath);
+  if (S_ISLNK(symlink_target_stat.st_mode)) {
+    /* this is super nasty ... we need to handle multiple levels of
+       symlinks ... yes, symlinks to symlinks!
 
-    //printf("  cp %s %s\n", symlink_target_abspath, symlink_dst_abspath);
-    // copy the target file over to cde-root/
-    if ((link(src_file, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
-      copy_file(src_file, symlink_dst_abspath);
+      some programs like java are really picky about the EXACT directory
+      structure being replicated within cde-package.  e.g., java will refuse
+      to start unless the directory structure is perfectly mimicked (since it
+      uses its true path to load start-up libraries).  this means that CDE
+      Needs to be able to potentially traverse through multiple levels of
+      symlinks and faithfully recreate them within cde-package.
+
+      For example, on chongzi (Fedora Core 9):
+
+      /usr/bin/java is a symlink to /etc/alternatives/java
+
+      but /etc/alternatives/java is itself a symlink to /usr/lib/jvm/jre-1.6.0-openjdk/bin/java
+
+      this example involves 2 levels of symlinks, and java requires that the
+      TRUE binary to be found here in the package in order to run properly:
+
+        /usr/lib/jvm/jre-1.6.0-openjdk/bin/java
+
+    */
+    // krazy rekursive kall!!!
+    create_symlink_in_cde_root(symlink_target_abspath, child_current_pwd);
+  }
+  else {
+    // ok, let's get the absolute path without any '..' or '.' funniness
+    // MUST DO IT IN THIS ORDER, OR IT WILL EXHIBIT SUBTLE BUGS!!!
+    char* symlink_dst_original_path = canonicalize_abspath(symlink_target_abspath);
+    char* symlink_dst_abspath = prepend_cderoot(symlink_dst_original_path);
+    //printf("  symlink_target_abspath: %s\n", symlink_target_abspath);
+    //printf("  symlink_dst_abspath: %s\n\n", symlink_dst_abspath);
+
+    if (S_ISREG(symlink_target_stat.st_mode)) {
+      // base case, just hard link or copy symlink_target_abspath into symlink_dst_abspath
+
+      // ugh, this is getting really really gross, mkdir all dirs stated in
+      // symlink_dst_abspath if they don't yet exist
+      //mkdir_recursive(symlink_dst_abspath, 1);
+      make_mirror_dirs_in_cde_package(symlink_dst_original_path, 1);
+
+      //printf("  cp %s %s\n", symlink_target_abspath, symlink_dst_abspath);
+      // copy the target file over to cde-root/
+      if ((link(symlink_target_abspath, symlink_dst_abspath) != 0) && (errno != EEXIST)) {
+        copy_file(symlink_target_abspath, symlink_dst_abspath);
+      }
+
+      // if it's a shared library, then heuristically try to grep
+      // through it to find whether it might dynamically load any other
+      // libraries (e.g., those for other CPU types that we can't pick
+      // up via strace)
+      find_and_copy_possible_dynload_libs(filename, child_current_pwd);
+    }
+    else if (S_ISDIR(symlink_target_stat.st_mode)) { // symlink to directory
+      // make sure the target directory actually exists
+      //mkdir_recursive(symlink_dst_abspath, 0);
+      make_mirror_dirs_in_cde_package(symlink_dst_original_path, 0);
+    }
+    else {
+      fprintf(stderr, "CDE WARNING: create_symlink_in_cde_root('%s') has unknown target file type\n", filename);
     }
 
-    free(src_file);
-
-    // if it's a shared library, then heuristically try to grep
-    // through it to find whether it might dynamically load any other
-    // libraries (e.g., those for other CPU types that we can't pick
-    // up via strace)
-    find_and_copy_possible_dynload_libs(filename, child_current_pwd);
-  }
-  else { // symlink to directory
-    // make sure the target directory actually exists
-    //mkdir_recursive(symlink_dst_abspath, 0);
-    make_mirror_dirs_in_cde_package(symlink_dst_original_path, 0);
+    free(symlink_dst_abspath);
+    free(symlink_dst_original_path);
   }
 
-  free(symlink_loc_in_package);
   free(symlink_target_abspath);
-  free(symlink_dst_abspath);
-  free(symlink_dst_original_path);
-  free(filename_abspath_copy);
-  free(orig_symlink_target);
   free(filename_abspath);
 }
 
@@ -1942,6 +1925,16 @@ void CDE_init_tcb_dir_fields(struct tcb* tcp) {
     // otherwise create fresh fields derived from master (cde) process
     getcwd(tcp->current_dir, MAXPATHLEN);
     //printf("fresh %s [%d]\n", tcp->current_dir, tcp->pid);
+  }
+
+
+  // it's possible that tcp->perceived_program_fullpath has already been
+  // set, and if so, don't mess with it.  only inherit from parent if it
+  // hasn't been set yet (TODO: I don't fully understand the rationale
+  // for this, but it seems to work in practice so far)
+  if (!tcp->perceived_program_fullpath && tcp->parent) {
+    // aliased, so don't mutate or free
+    tcp->perceived_program_fullpath = tcp->parent->perceived_program_fullpath;
   }
 }
 
@@ -2026,9 +2019,10 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
   fprintf(f, "%s/cde-exec", dot_dots);
   // include original command-line options
   for (i = 1; i < optind; i++) {
-    fprintf(f, " \"%s\"", argv[i]);
+    fprintf(f, " '%s'", argv[i]);
   }
-  fprintf(f, " %s $@\n", target_program_fullpath);
+  // double quotes seem to work well for making $@ more accurate
+  fprintf(f, " '%s' \"$@\"\n", target_program_fullpath);
   fclose(f);
 
   chmod(progname_redirected, 0777); // now make the script executable
@@ -2043,9 +2037,10 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
 
     // include original command-line options
     for (i = 1; i < optind; i++) {
-      fprintf(f, " \"%s\"", argv[i]);
+      fprintf(f, " '%s'", argv[i]);
     }
-    fprintf(f, " %s $@\n", target_program_fullpath);
+    // double quotes seem to work well for make $@ more accurate
+    fprintf(f, " '%s' \"$@\"\n", target_program_fullpath);
 
     fclose(f);
     chmod(toplevel_script_name, 0777); // now make the script executable
@@ -2055,14 +2050,13 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
   free(cde_script_name);
 }
 
-
 void CDE_add_ignore_prefix_path(char* p) {
   assert(ignore_prefix_paths[ignore_prefix_paths_ind] == NULL);
   ignore_prefix_paths[ignore_prefix_paths_ind] = strdup(p);
   ignore_prefix_paths_ind++;
 
-  fprintf(stderr, "CDE ignoring prefix path: '%s'\n",
-          ignore_prefix_paths[ignore_prefix_paths_ind - 1]);
+  //fprintf(stderr, "CDE ignoring prefix path: '%s'\n",
+  //        ignore_prefix_paths[ignore_prefix_paths_ind - 1]);
 
   if (ignore_prefix_paths_ind >= 100) {
     fprintf(stderr, "Fatal error: more than 100 entries in ignore_prefix_paths\n");
@@ -2075,8 +2069,8 @@ void CDE_add_ignore_exact_path(char* p) {
   ignore_exact_paths[ignore_exact_paths_ind] = strdup(p);
   ignore_exact_paths_ind++;
 
-  fprintf(stderr, "CDE ignoring exact path: '%s'\n",
-          ignore_exact_paths[ignore_exact_paths_ind - 1]);
+  //fprintf(stderr, "CDE ignoring exact path: '%s'\n",
+  //        ignore_exact_paths[ignore_exact_paths_ind - 1]);
 
   if (ignore_exact_paths_ind >= 100) {
     fprintf(stderr, "Fatal error: more than 100 entries in ignore_exact_paths\n");
@@ -2084,17 +2078,34 @@ void CDE_add_ignore_exact_path(char* p) {
   }
 }
 
+void CDE_add_ignore_envvar(char* p) {
+  assert(ignore_envvars[ignore_envvars_ind] == NULL);
+  ignore_envvars[ignore_envvars_ind] = strdup(p);
+  ignore_envvars_ind++;
 
-// initialize ignore_exact_paths and ignore_prefix_paths based on
-// the cde.ignore file, which has the grammar:
+  //fprintf(stderr, "CDE ignoring environment var: '%s'\n",
+  //        ignore_envvars[ignore_envvars_ind - 1]);
+
+  if (ignore_envvars_ind >= 100) {
+    fprintf(stderr, "Fatal error: more than 100 entries in ignore_envvars\n");
+    exit(1);
+  }
+}
+
+
+// initialize ignore_exact_paths, ignore_prefix_paths, and ignore_envvars
+// based on the cde.ignore file, which has the grammar:
 // ignore_prefix=<path prefix to ignore>
 // ignore_exact=<exact path to ignore>
+// ignore_environment_var=<environment variable to ignore>
 void CDE_init_ignore_paths() {
   memset(ignore_exact_paths, 0, sizeof(ignore_exact_paths));
   memset(ignore_prefix_paths, 0, sizeof(ignore_prefix_paths));
+  memset(ignore_envvars, 0, sizeof(ignore_envvars));
 
   ignore_exact_paths_ind = 0;
   ignore_prefix_paths_ind = 0;
+  ignore_envvars_ind = 0;
 
   FILE* f = NULL;
 
@@ -2102,6 +2113,7 @@ void CDE_init_ignore_paths() {
     // look for a cde.ignore file in $CDE_PACKAGE_DIR
 
     // you must run this AFTER running CDE_init_pseudo_root_dir()
+    assert(*cde_pseudo_root_dir);
     char* ignore_file = format("%s/../cde.ignore", cde_pseudo_root_dir);
     f = fopen(ignore_file, "r");
     free(ignore_file);
@@ -2117,7 +2129,8 @@ void CDE_init_ignore_paths() {
   }
 
   if (!f) {
-    return;
+    fprintf(stderr, "Fatal error: missing cde.ignore file\n");
+    exit(1);
   }
 
 
@@ -2130,15 +2143,18 @@ void CDE_init_ignore_paths() {
 
     char* p;
     char is_first_token = 1;
-    char set_ignore_exact_path = 0;
+    char set_id = -1;
 
     for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
       if (is_first_token) {
         if (strcmp(p, "ignore_exact") == 0) {
-          set_ignore_exact_path = 1;
+          set_id = 1;
         }
         else if (strcmp(p, "ignore_prefix") == 0) {
-          set_ignore_exact_path = 0;
+          set_id = 2;
+        }
+        else if (strcmp(p, "ignore_environment_var") == 0) {
+          set_id = 3;
         }
         else {
           fprintf(stderr, "Fatal error in cde.ignore: unrecognized token '%s'\n", p);
@@ -2148,15 +2164,99 @@ void CDE_init_ignore_paths() {
         is_first_token = 0;
       }
       else {
-        if (set_ignore_exact_path) {
+        if (set_id == 1) {
           CDE_add_ignore_exact_path(p);
         }
-        else {
+        else if (set_id == 2) {
           CDE_add_ignore_prefix_path(p);
+        }
+        else {
+          assert(set_id == 3);
+          CDE_add_ignore_envvar(p);
         }
         break;
       }
     }
   }
+}
+
+
+void CDE_load_environment_vars() {
+  static char cde_full_environment_abspath[MAXPATHLEN];
+  strcpy(cde_full_environment_abspath, cde_pseudo_root_dir);
+  strcat(cde_full_environment_abspath, "/../cde.full-environment");
+
+  struct stat env_file_stat;
+  if (stat(cde_full_environment_abspath, &env_file_stat)) {
+    perror(cde_full_environment_abspath);
+    exit(1);
+  }
+
+  int full_environment_fd = open(cde_full_environment_abspath, O_RDONLY);
+
+  void* environ_start =
+    (char*)mmap(0, env_file_stat.st_size, PROT_READ, MAP_PRIVATE, full_environment_fd, 0);
+
+  char* environ_str = (char*)environ_start;
+  while (*environ_str) {
+    int environ_strlen = strlen(environ_str);
+
+    // format: "name=value"
+    // note that 'value' might itself contain '=' characters,
+    // so only split on the FIRST '='
+
+    char* cur = strdup(environ_str); // strtok needs to mutate
+    char* name = NULL;
+    char* val = NULL;
+
+    int count = 0;
+    char* p;
+    int start_index_of_value = 0;
+
+    // strtok is so dumb!!!  need to munch through the entire string
+    // before it restores the string to its original value
+    for (p = strtok(cur, "="); p; p = strtok(NULL, "=")) {
+      if (count == 0) {
+        name = strdup(p);
+      }
+      else if (count == 1) {
+        start_index_of_value = (p - cur);
+      }
+
+      count++;
+    }
+
+    if (start_index_of_value) {
+      val = strdup(environ_str + start_index_of_value);
+    }
+
+    // make sure we're not ignoring this environment var:
+    int i;
+    int ignore_me = 0;
+    for (i = 0; i < ignore_envvars_ind; i++) {
+      if (strcmp(name, ignore_envvars[i]) == 0) {
+        ignore_me = 1;
+        break;
+      }
+    }
+
+    if (!ignore_me) {
+      setenv(name, val, 1); // do it!!!
+    }
+    else {
+      //printf("ignored '%s' => '%s'\n", name, val);
+    }
+
+    if (name) free(name);
+    if (val) free(val);
+    free(cur);
+
+    // every string in cde_full_environment_abspath is
+    // null-terminated, so this advances to the next string
+    environ_str += (environ_strlen + 1);
+  }
+
+  munmap(environ_start, env_file_stat.st_size);
+  close(full_environment_fd);
 }
 
