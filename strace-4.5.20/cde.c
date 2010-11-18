@@ -31,10 +31,6 @@ __asm__(".symver shmctl,shmctl@GLIBC_2.0"); // hack to eliminate glibc 2.2 depen
 // 0 for tracing regular execution
 char CDE_exec_mode;
 
-// if this is 1, the do not ignore ANY paths by default
-// activated by the -n option
-char CDE_no_default_path_ignores = 0;
-
 static void begin_setup_shmat(struct tcb* tcp);
 static void* find_free_addr(int pid, int exec, unsigned long size);
 static void find_and_copy_possible_dynload_libs(char* filename, char* child_current_pwd);
@@ -58,6 +54,8 @@ static char* ignore_exact_paths[100];
 int ignore_exact_paths_ind = 0;
 static char* ignore_prefix_paths[100];
 int ignore_prefix_paths_ind = 0;
+static char* ignore_envvars[100]; // each element should be an environment variable to ignore
+int ignore_envvars_ind = 0;
 
 // the absolute path to the cde-root/ directory, since that will be
 // where our fake filesystem starts. e.g., if cde_starting_pwd is
@@ -209,30 +207,6 @@ static int ignore_path(char* filename) {
     return 1;
   }
 
-  if (!CDE_no_default_path_ignores) {
-    // /dev, /proc, and /sys are special system directories with fake files
-    //
-    // /var contains 'volatile' temp files that change when system is
-    // running normally
-    //
-    // .Xauthority is used for X11 authentication via ssh, so we need to
-    // use the REAL version and not the one in cde-root/
-    //
-    // ignore "/tmp" and "/tmp/*" since programs often put lots of
-    // session-specific stuff into /tmp so DO NOT track files within
-    // there, or else you will risk severely 'overfitting' and ruining
-    // portability across machines.  it's safe to assume that all Linux
-    // distros have a /tmp directory that anybody can write into
-    if ((strncmp(filename, "/dev/", 5) == 0) ||
-        (strncmp(filename, "/proc/", 6) == 0) ||
-        (strncmp(filename, "/sys/", 5) == 0) ||
-        (strncmp(filename, "/var/", 5) == 0) ||
-        (strcmp(filename, "/tmp") == 0) ||      // exact match for /tmp directory
-        (strncmp(filename, "/tmp/", 5) == 0) || // put trailing '/' to avoid bogus substring matches
-        (strcmp(basename(filename), ".Xauthority") == 0)) {
-      return 1;
-    }
-  }
 
   // custom ignore paths, as specified in cde.ignore
   int i;
@@ -2044,14 +2018,13 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
   free(cde_script_name);
 }
 
-
 void CDE_add_ignore_prefix_path(char* p) {
   assert(ignore_prefix_paths[ignore_prefix_paths_ind] == NULL);
   ignore_prefix_paths[ignore_prefix_paths_ind] = strdup(p);
   ignore_prefix_paths_ind++;
 
-  fprintf(stderr, "CDE ignoring prefix path: '%s'\n",
-          ignore_prefix_paths[ignore_prefix_paths_ind - 1]);
+  //fprintf(stderr, "CDE ignoring prefix path: '%s'\n",
+  //        ignore_prefix_paths[ignore_prefix_paths_ind - 1]);
 
   if (ignore_prefix_paths_ind >= 100) {
     fprintf(stderr, "Fatal error: more than 100 entries in ignore_prefix_paths\n");
@@ -2064,8 +2037,8 @@ void CDE_add_ignore_exact_path(char* p) {
   ignore_exact_paths[ignore_exact_paths_ind] = strdup(p);
   ignore_exact_paths_ind++;
 
-  fprintf(stderr, "CDE ignoring exact path: '%s'\n",
-          ignore_exact_paths[ignore_exact_paths_ind - 1]);
+  //fprintf(stderr, "CDE ignoring exact path: '%s'\n",
+  //        ignore_exact_paths[ignore_exact_paths_ind - 1]);
 
   if (ignore_exact_paths_ind >= 100) {
     fprintf(stderr, "Fatal error: more than 100 entries in ignore_exact_paths\n");
@@ -2073,17 +2046,34 @@ void CDE_add_ignore_exact_path(char* p) {
   }
 }
 
+void CDE_add_ignore_envvar(char* p) {
+  assert(ignore_envvars[ignore_envvars_ind] == NULL);
+  ignore_envvars[ignore_envvars_ind] = strdup(p);
+  ignore_envvars_ind++;
 
-// initialize ignore_exact_paths and ignore_prefix_paths based on
-// the cde.ignore file, which has the grammar:
+  //fprintf(stderr, "CDE ignoring environment var: '%s'\n",
+  //        ignore_envvars[ignore_envvars_ind - 1]);
+
+  if (ignore_envvars_ind >= 100) {
+    fprintf(stderr, "Fatal error: more than 100 entries in ignore_envvars\n");
+    exit(1);
+  }
+}
+
+
+// initialize ignore_exact_paths, ignore_prefix_paths, and ignore_envvars
+// based on the cde.ignore file, which has the grammar:
 // ignore_prefix=<path prefix to ignore>
 // ignore_exact=<exact path to ignore>
+// ignore_environment_var=<environment variable to ignore>
 void CDE_init_ignore_paths() {
   memset(ignore_exact_paths, 0, sizeof(ignore_exact_paths));
   memset(ignore_prefix_paths, 0, sizeof(ignore_prefix_paths));
+  memset(ignore_envvars, 0, sizeof(ignore_envvars));
 
   ignore_exact_paths_ind = 0;
   ignore_prefix_paths_ind = 0;
+  ignore_envvars_ind = 0;
 
   FILE* f = NULL;
 
@@ -2091,6 +2081,7 @@ void CDE_init_ignore_paths() {
     // look for a cde.ignore file in $CDE_PACKAGE_DIR
 
     // you must run this AFTER running CDE_init_pseudo_root_dir()
+    assert(*cde_pseudo_root_dir);
     char* ignore_file = format("%s/../cde.ignore", cde_pseudo_root_dir);
     f = fopen(ignore_file, "r");
     free(ignore_file);
@@ -2106,7 +2097,8 @@ void CDE_init_ignore_paths() {
   }
 
   if (!f) {
-    return;
+    fprintf(stderr, "Fatal error: missing cde.ignore file\n");
+    exit(1);
   }
 
 
@@ -2119,15 +2111,18 @@ void CDE_init_ignore_paths() {
 
     char* p;
     char is_first_token = 1;
-    char set_ignore_exact_path = 0;
+    char set_id = -1;
 
     for (p = strtok(line, "="); p; p = strtok(NULL, "=")) {
       if (is_first_token) {
         if (strcmp(p, "ignore_exact") == 0) {
-          set_ignore_exact_path = 1;
+          set_id = 1;
         }
         else if (strcmp(p, "ignore_prefix") == 0) {
-          set_ignore_exact_path = 0;
+          set_id = 2;
+        }
+        else if (strcmp(p, "ignore_environment_var") == 0) {
+          set_id = 3;
         }
         else {
           fprintf(stderr, "Fatal error in cde.ignore: unrecognized token '%s'\n", p);
@@ -2137,15 +2132,100 @@ void CDE_init_ignore_paths() {
         is_first_token = 0;
       }
       else {
-        if (set_ignore_exact_path) {
+        if (set_id == 1) {
           CDE_add_ignore_exact_path(p);
         }
-        else {
+        else if (set_id == 2) {
           CDE_add_ignore_prefix_path(p);
+        }
+        else {
+          assert(set_id == 3);
+          CDE_add_ignore_envvar(p);
         }
         break;
       }
     }
   }
+}
+
+
+void CDE_load_environment_vars() {
+  static char cde_full_environment_abspath[MAXPATHLEN];
+  strcpy(cde_full_environment_abspath, cde_pseudo_root_dir);
+  strcat(cde_full_environment_abspath, "/../cde.full-environment");
+
+  struct stat env_file_stat;
+  if (stat(cde_full_environment_abspath, &env_file_stat)) {
+    perror(cde_full_environment_abspath);
+    exit(1);
+  }
+
+  int full_environment_fd = open(cde_full_environment_abspath, O_RDONLY);
+
+  void* environ_start =
+    (char*)mmap(0, env_file_stat.st_size, PROT_READ, MAP_PRIVATE, full_environment_fd, 0);
+
+  char* environ_str = (char*)environ_start;
+  while (*environ_str) {
+    int environ_strlen = strlen(environ_str);
+
+    // format: "name=value"
+    // note that 'value' might itself contain '=' characters,
+    // so only split on the FIRST '='
+
+    char* cur = strdup(environ_str); // strtok needs to mutate
+    char* name = NULL;
+    char* val = NULL;
+
+    int count = 0;
+    char* p;
+    int start_index_of_value = 0;
+
+    // strtok is so dumb!!!  need to munch through the entire string
+    // before it restores the string to its original value
+    for (p = strtok(cur, "="); p; p = strtok(NULL, "=")) {
+      if (count == 0) {
+        name = strdup(p);
+      }
+      else if (count == 1) {
+        start_index_of_value = (p - cur);
+      }
+
+      count++;
+    }
+
+    if (start_index_of_value) {
+      val = strdup(environ_str + start_index_of_value);
+    }
+
+    // make sure we're not ignoring this environment var:
+    int i;
+    int ignore_me = 0;
+    for (i = 0; i < ignore_envvars_ind; i++) {
+      if (strcmp(name, ignore_envvars[i]) == 0) {
+        ignore_me = 1;
+        break;
+      }
+    }
+
+    if (!ignore_me) {
+      printf("'%s' => '%s'\n", name, val);
+      setenv(name, val, 1); // do it!!!
+    }
+    else {
+      //printf("ignored '%s' => '%s'\n", name, val);
+    }
+
+    if (name) free(name);
+    if (val) free(val);
+    free(cur);
+
+    // every string in cde_full_environment_abspath is
+    // null-terminated, so this advances to the next string
+    environ_str += (environ_strlen + 1);
+  }
+
+  munmap(environ_start, env_file_stat.st_size);
+  close(full_environment_fd);
 }
 
