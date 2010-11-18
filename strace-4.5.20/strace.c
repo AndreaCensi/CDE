@@ -813,8 +813,10 @@ main(int argc, char *argv[])
       fputs("ignore_prefix=/tmp/\n", f);
       fputs("ignore_exact=/tmp\n", f);
 
-      // this might throw warnings in GNOME apps like Firefox and GIMP
-      //fputs("ignore_environment_var=DBUS_SESSION_BUS_ADDRESS\n", f);
+      // these environment vars might contribute to 'overfitting'
+      fputs("ignore_environment_var=DBUS_SESSION_BUS_ADDRESS\n", f);
+      fputs("ignore_environment_var=ORBIT_SOCKETDIR\n", f);
+      fputs("ignore_environment_var=SESSION_MANAGER\n", f);
      
       fclose(f);
     }
