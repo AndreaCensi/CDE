@@ -1165,17 +1165,17 @@ main(int argc, char *argv[])
     FILE* log_f;
     if (stat(CDE_PACKAGE_DIR "/cde.log", &tmp)) {
       log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "w");
-      fprintf(log_f, "cd " CDE_ROOT_NAME "%s", cde_starting_pwd);
+      fprintf(log_f, "cd '" CDE_ROOT_NAME "%s'", cde_starting_pwd);
       fputc('\n', log_f);
     }
     else {
       log_f = fopen(CDE_PACKAGE_DIR "/cde.log", "a");
     }
 
-    fprintf(log_f, "./%s.cde", basename(argv[optind]));
+    fprintf(log_f, "'./%s.cde'", basename(argv[optind]));
     int i;
     for (i = optind + 1; argv[i] != NULL; i++) {
-      fprintf(log_f, " %s", argv[i]);
+      fprintf(log_f, " '%s'", argv[i]); // add quotes for accuracy
     }
     fputc('\n', log_f);
     fclose(log_f);

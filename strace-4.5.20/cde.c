@@ -2013,9 +2013,10 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
   fprintf(f, "%s/cde-exec", dot_dots);
   // include original command-line options
   for (i = 1; i < optind; i++) {
-    fprintf(f, " \"%s\"", argv[i]);
+    fprintf(f, " '%s'", argv[i]);
   }
-  fprintf(f, " %s $@\n", target_program_fullpath);
+  // double quotes seem to work well for $@ for some mysterious reason
+  fprintf(f, " '%s' \"$@\"\n", target_program_fullpath);
   fclose(f);
 
   chmod(progname_redirected, 0777); // now make the script executable
