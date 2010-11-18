@@ -2209,7 +2209,6 @@ void CDE_load_environment_vars() {
     }
 
     if (!ignore_me) {
-      printf("'%s' => '%s'\n", name, val);
       setenv(name, val, 1); // do it!!!
     }
     else {
