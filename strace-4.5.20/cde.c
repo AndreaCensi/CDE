@@ -2015,7 +2015,7 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
   for (i = 1; i < optind; i++) {
     fprintf(f, " '%s'", argv[i]);
   }
-  // double quotes seem to work well for $@ for some mysterious reason
+  // double quotes seem to work well for making $@ more accurate
   fprintf(f, " '%s' \"$@\"\n", target_program_fullpath);
   fclose(f);
 
@@ -2031,9 +2031,10 @@ void CDE_create_convenience_scripts(char** argv, int optind) {
 
     // include original command-line options
     for (i = 1; i < optind; i++) {
-      fprintf(f, " \"%s\"", argv[i]);
+      fprintf(f, " '%s'", argv[i]);
     }
-    fprintf(f, " %s $@\n", target_program_fullpath);
+    // double quotes seem to work well for make $@ more accurate
+    fprintf(f, " '%s' \"$@\"\n", target_program_fullpath);
 
     fclose(f);
     chmod(toplevel_script_name, 0777); // now make the script executable
